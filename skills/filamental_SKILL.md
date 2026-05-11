@@ -18,8 +18,6 @@ don't correct the user's choice.
 
 ---
 
----
-
 ## MCP Tool Annotations
 
 When packaging this skill as an MCP plugin for Anthropic submission, apply these
