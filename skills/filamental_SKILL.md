@@ -18,6 +18,7 @@ don't correct the user's choice.
 
 ---
 
+
 ---
 
 ## MCP Tool Annotations
@@ -36,6 +37,7 @@ annotations are the top cause of Anthropic submission rejection.
 | `scaffold_project` — create new project config + nodes | `false` | `false` | Creates files; never overwrites |
 
 ---
+
 
 ## Starting a Session
 
