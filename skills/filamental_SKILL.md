@@ -129,9 +129,11 @@ to see them appear."
 If you don't have write access: output the file blocks clearly, one per node, so the user
 can save them manually.
 
-Before generating any node files, load `references/filamental-format.md`. This contains
-the complete format spec, UUID rules, filename conventions, and the integrity checklist
-you must run before writing.
+Before generating any node files, load the format reference. In Cowork with the skill
+installed, invoke the `filamental-format-reference` skill. In other environments, the
+format reference is distributed as a separate file — load it before writing any nodes.
+It contains the complete format spec, UUID rules, filename conventions, and the integrity
+checklist you must run before writing.
 
 ### Generating a Briefing
 
@@ -192,17 +194,68 @@ the extra exchange.
 
 **Step 4 — Generate the project files.**
 
-Once confirmed, generate in this order:
+Once confirmed, follow this exact sequence:
 
 1. `.filamental/entity_types.json` — confirmed entity types
 2. `.filamental/connector_types.json` — confirmed connector types
-3. `.filamental/world.json` — use the default template in `references/filamental-format.md`
-4. An initial batch of nodes covering the core of the topic
+3. `.filamental/world.json` — use the default template from the format reference
+4. Generate all UUIDs for the full node batch in one go before writing any node files.
+   Assign each UUID to a named node on paper first. This is non-negotiable — it is the
+   only way to guarantee every relationship `target` resolves before a file is written.
+5. Write nodes in dependency order: nodes that others point *at* first, then the nodes
+   that reference them. Panel members, source entities, and anchors before derivatives.
+6. Run the integrity checklist from the format reference across the full batch before
+   writing anything to disk.
 
 **Node count:** aim for 15 to 40 nodes for a first pass. Fewer than 15 rarely reveals
 useful structure. More than 60 to 70 becomes difficult for a person to read and navigate
 on screen. If the topic needs more coverage, suggest splitting into linked projects rather
 than cramming everything into one. This is a human readability limit, not a technical one.
+
+### Building from a Conversation or Session
+
+A Filamental world can be built from a conversation, meeting, brainstorm, or any
+session where ideas were explored but not yet structured. This is a distinct and
+valuable use case — the source material is rich but unordered, and the job is to
+distil it into a navigable graph that is more useful than a transcript.
+
+**The approach:**
+
+First, read the source material in full before designing anything. Identify the
+natural categories of idea that emerge — these become the entity types. Look for
+recurring patterns: are there foundational beliefs? Specific product or design
+decisions? External forces or signals? Unresolved tensions? Each distinct category
+of idea is a candidate type.
+
+Resist the urge to use generic types like "idea" or "topic". The test is Layers view:
+each type should produce a band where every node in it clearly belongs together and
+is clearly distinct from every other band.
+
+Design the connector vocabulary around the actual relationships present in the source.
+What are the meaningful connections? Does one idea *inform* another? *Challenge* it?
+*Extend* it? *Depend on* it? Name the connectors after the relationship, not the
+subject matter.
+
+**What to capture in node notes:**
+
+For conversation-sourced worlds, node notes are especially important. The graph
+structure shows *that* connections exist — the notes preserve *why*. Each node should
+capture:
+- The core idea in the author's own words where possible
+- Who raised it and in what context (attribution)
+- Why it matters — the implication or consequence
+- Any tensions or caveats that were surfaced
+
+A node with rich notes can brief a future AI session on a cold-start without needing
+the original conversation. That is the test: if someone opens this world in six months
+with no memory of the conversation, do the notes give them enough to re-enter?
+
+**What to leave out:**
+
+Not everything in a conversation deserves a node. Filter for ideas with lasting
+relevance — things that will still be meaningful in a future session. Exploratory
+dead-ends, pleasantries, and in-the-moment tangents can be omitted. The graph should
+represent the *residue* of the thinking, not a transcript of it.
 
 ---
 
@@ -259,7 +312,9 @@ infer 2 to 3 relevant properties from the node's content and entity type. After 
 mention to the user which property keys you used so they can formalise them in
 `entity_types.json` if they want them standard across that type.
 
-Examples of good properties by type: see `references/filamental-format.md`.
+Examples of good properties by type: see the format reference (invoke
+`filamental-format-reference` in Cowork, or load the distributed format reference file
+in other environments).
 
 ---
 
@@ -294,7 +349,9 @@ Never write a label where a key is required.
 
 ## Format Compliance
 
-When writing any node file, load `references/filamental-format.md` first.
+When writing any node file, load the format reference first. In Cowork, invoke the
+`filamental-format-reference` skill. In other environments, load the distributed
+format reference file.
 
 The rules that matter most, always:
 
