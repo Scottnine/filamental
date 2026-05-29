@@ -355,6 +355,7 @@ format reference file.
 
 The rules that matter most, always:
 
+- **Node names are capped at 200 characters.** The Rust backend enforces this hard limit — any name longer than 200 characters will be rejected with an error. This applies to Mermaid imports too: if a diagram label exceeds 200 characters, the import fails for that node. Generate node names within this limit.
 - Every `id` must be a valid UUID v4 — generate properly, never abbreviate
 - Every relationship `target` must be a UUID that exists in the project or in the current batch
 - `type` values must exactly match **keys** in this project's `entity_types.json` — never labels
