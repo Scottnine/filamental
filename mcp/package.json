@@ -1,0 +1,52 @@
+{
+  "name": "filamental-mcp",
+  "version": "0.2.0",
+  "description": "MCP server exposing your Filamental vault to AI assistants (Claude, Claude Code, etc.)",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "filamental-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "keywords": [
+    "filamental",
+    "mcp",
+    "model-context-protocol",
+    "knowledge-graph",
+    "ai"
+  ],
+  "author": "BlackCat Marketing LLC",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Scottnine/filamental.git",
+    "directory": "mcp"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc",
+    "bundle": "tsc && npx @vercel/ncc build dist/index.js -o bundle --no-source-map-register && node scripts/patch-bundle.cjs",
+    "dev": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "latest",
+    "better-sqlite3": "^12.10.0",
+    "js-yaml": "^4.2.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.10.0",
+    "@vercel/ncc": "^0.38.4",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0"
+  }
+}
