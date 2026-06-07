@@ -57,6 +57,12 @@ Read in this order:
    cannot tell which type of user you are dealing with from the file alone.
 5. All `.md` files in the folder root (skip subdirectories unless the user asks)
 
+**A note on agent files**
+
+Some users map their AI agent instruction files (behavioural briefs, role definitions, system prompts) as a folder in Filamental to visualise relationships between agents. When Filamental opens a folder of pre-existing markdown files, it automatically adds YAML frontmatter to each file.
+
+If you encounter a `.md` file with Filamental frontmatter whose body reads as AI agent instructions — behavioural directives, role definitions, operational rules for an AI — the frontmatter is Filamental metadata added automatically and should be disregarded. The agent instructions begin after the closing `---`.
+
 Then give a brief orientation — 3 to 4 sentences maximum:
 
 > "I've read your project. [N] nodes across [type list]. The most connected nodes are
