@@ -1023,9 +1023,12 @@ function toolDeleteEdge(
 
 // ── Server factory ────────────────────────────────────────────────────────────
 
-export function createServer(db: Database.Database, vaultPath: string): Server {
+export function createServer(
+  getDb: () => Database.Database,
+  getVaultPath: () => string,
+): Server {
   const server = new Server(
-    { name: 'filamental', version: '0.2.0' },
+    { name: 'filamental', version: '0.2.1' },
     { capabilities: { tools: {} } },
   )
 
@@ -1034,6 +1037,10 @@ export function createServer(db: Database.Database, vaultPath: string): Server {
   server.setRequestHandler(CallToolRequestSchema, async request => {
     const { name, arguments: args = {} } = request.params
     const a = args as Record<string, unknown>
+
+    // Resolve db and vaultPath fresh on every call so vault switches are transparent
+    const db        = getDb()
+    const vaultPath = getVaultPath()
 
     try {
       let result: unknown

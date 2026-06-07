@@ -1,6 +1,6 @@
 {
   "name": "filamental-mcp",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "MCP server exposing your Filamental vault to AI assistants (Claude, Claude Code, etc.)",
   "type": "module",
   "main": "dist/index.js",

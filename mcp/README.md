@@ -23,7 +23,7 @@ The easiest way to connect is through the app:
 2. Click **Connect to Claude Desktop**
 3. Restart Claude Desktop
 
-Filamental resolves all paths automatically and writes the correct entry to `claude_desktop_config.json`.
+Filamental resolves all paths automatically. The MCP follows whichever vault you have open — no restart needed when you switch worlds.
 
 ---
 
@@ -47,16 +47,14 @@ Then add to your `claude_desktop_config.json`:
       "command": "node",
       "args": [
         "--no-warnings",
-        "/absolute/path/to/node_modules/filamental-mcp/dist/index.js",
-        "--vault",
-        "/absolute/path/to/your/vault"
+        "/absolute/path/to/node_modules/filamental-mcp/dist/index.js"
       ]
     }
   }
 }
 ```
 
-> Vault path must be absolute. Claude Desktop launches the server from a varying working directory, so relative paths are not reliable.
+No `--vault` argument needed. The server reads the active vault from Filamental automatically and reconnects when you switch worlds. To pin to a specific vault (e.g. for testing), pass `--vault <absolute-path>` explicitly.
 
 ### Claude Code
 
