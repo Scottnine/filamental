@@ -1,6 +1,6 @@
 {
   "name": "filamental-mcp",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "MCP server exposing your Filamental vault to AI assistants (Claude, Claude Code, etc.)",
   "type": "module",
   "main": "dist/index.js",
@@ -37,7 +37,7 @@
     "dev": "tsx src/index.ts"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "latest",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "better-sqlite3": "^12.10.0",
     "js-yaml": "^4.2.0"
   },
