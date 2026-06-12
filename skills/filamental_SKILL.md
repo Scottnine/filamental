@@ -168,6 +168,14 @@ still make sense six months later — is genuinely hard. Most people building th
 Filamental project haven't thought in these terms before. Your job is to think it through
 with them before a single node is created.
 
+**Folder naming convention**
+
+When you create a new Filamental project folder, the folder name must follow this format:
+`[Descriptive Name] Space` in title case throughout, including the word "Space". Examples:
+`Applications Space`, `Stanmore Investigation Space`, `Product Research Space`. Never use
+lowercase slugs, snake_case, or omit the "Space" suffix. This applies in all environments:
+Cowork, Claude Code, MCP, or any other AI-driven workflow.
+
 **Step 1 — Work out the type vocabulary together.**
 
 Before proposing anything, ask enough questions to understand the domain. Then propose 4 to
