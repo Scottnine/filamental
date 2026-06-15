@@ -155,7 +155,7 @@ Build a key↔label map at the start of every session and resolve in both direct
 **Key points:**
 - `type_key` is the value used in node frontmatter `type:` fields — always a lowercase key,
   never the label string
-- `icon` is one of: `sphere`, `cube`, `cylinder`
+- `icon` is stored in the type config but has no visual effect on the canvas — all nodes render as glass cards regardless of this value. Include it in generated type configs (use `sphere` as the default) but do not use it to differentiate node shapes
 - `default_properties` defines which property keys are expected on nodes of this type;
   `{}` means none are formally defined
 - The `unclassified` type is always present as a fallback; use it only when nothing else fits
