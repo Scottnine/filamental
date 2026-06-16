@@ -10,6 +10,8 @@ on:
 jobs:
   build-mac:
     runs-on: macos-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Set up SSH agent for Bitbucket
