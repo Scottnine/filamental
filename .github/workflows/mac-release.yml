@@ -69,6 +69,14 @@ jobs:
             -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security list-keychain -d user -s "$KEYCHAIN_PATH"
 
+      - name: Sign better_sqlite3.node with Developer ID
+        run: |
+          codesign --force --verify --verbose \
+            --sign "Developer ID Application: Scott Turnbull (V9MB7JL7JZ)" \
+            --timestamp \
+            --options runtime \
+            mcp/bundle/build/Release/better_sqlite3.node
+
       - name: Write Apple API key for notarization
         env:
           APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY }}
