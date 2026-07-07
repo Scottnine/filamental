@@ -36,7 +36,7 @@ relationships:
   type: connector_type_key                         # Must match a key in connector_types.json
   direction: none                                  # none | incoming | outgoing
   label: short descriptive label                   # OPTIONAL — labels this specific connection
-  influence: normal                                # normal | weak | none
+  influence: normal                                # normal | weak | none (UI shows the last as "Weakest" — see Labels vs Keys)
   properties: {}
 attachments: []                             # Always empty when generating; user adds via UI
 composition_mode: atomic                    # Always atomic for standard nodes
@@ -122,6 +122,11 @@ Every type in Filamental has two identifiers:
 | **Key** | Node file `type:` field, connector `type:` field | `distribution`, `money`, `controls` |
 | **Label** | UI display, user conversation | `Distribution`, `Money`, `Controls` |
 
+The same key/label split applies to the `influence` field on individual relationships: the
+file always stores `normal`, `weak`, or `none`; the UI shows that last one as "Weakest." A
+user talking about "the weakest tie" or "weakest influence" means `influence: none` in the
+file — never write a literal `weakest` value, it isn't part of the schema.
+
 In current Filamental projects, keys and labels are typically close or identical. They
 can still diverge — particularly in older projects or when a user has customised the
 label after the key was set. The principle always applies: a user describes what they see
@@ -191,9 +196,48 @@ names like `type_1` or `node` — they lose meaning as the world grows.
 - `style` can be `solid` or `dashed` (optional field; defaults to solid when absent)
 - `physics_attraction` (optional) controls how strongly this connector pulls nodes together
 
+**`thickness` vs `physics_attraction` — do not conflate these.** `thickness` is a pure
+rendering property: it controls how bold the line looks and has no effect on the physics
+simulation whatsoever. `physics_attraction` is the property that actually changes how hard a
+connector type pulls its two nodes together in 2D, 3D, and Dark Energy layouts. A connector
+can be visually bold (`thickness: 2`) but physically weak (`physics_attraction: 0.1`), or the
+reverse — they're independent. If a project's graph looks correctly weighted at a glance but
+doesn't cluster the way the underlying facts would suggest once Dark Energy or 3D is turned
+on, check `physics_attraction` before assuming the type design is wrong; it's a very common
+oversight to set `thickness` per connector type for visual clarity and never touch
+`physics_attraction` at all, leaving every connector at the same default pull.
+
+**`influence` is the equivalent per-edge control**, set on the individual relationship
+rather than on the connector type. This is what lets two edges of the *same* connector type
+behave differently — for example, two `money` edges where one represents a genuinely large,
+well-evidenced transaction (`influence: normal`) and the other is a thin or largely
+structural reference (`influence: weak`). Layering per-edge `influence` on top of per-type
+`physics_attraction` is the combination that produces a graph where the physical layout
+actually tracks the strength of the underlying facts, rather than every edge of a given type
+pulling identically regardless of how significant it is.
+
+**`influence` is its own Labels vs Keys case.** The value stored in the node file is one of
+`normal`, `weak`, or `none` — write exactly that in the YAML, `none` is the correct key for
+the bottom of the scale. The UI displays that bottom value as "Weakest" rather than "None,"
+purely so a user reads it as the least-strength point on a scale rather than a binary
+off/on. When a user asks for "the weakest setting" or similar, that means `influence: none`
+in the file — don't write a literal `weakest` value, it doesn't exist in the schema.
+
+`influence` describes attraction strength only — it says nothing about whether a
+relationship is real or significant. `normal`, `weak` and `none` are three points on one
+spectrum (full pull → reduced pull → barely any pull); `none` does not mean "no
+relationship" or "ignore this edge," it means the edge is fully present, drawn, and
+traceable, but pulls its two nodes together only minimally in the layout. A common
+legitimate use of it is a real, worth-recording connection that would otherwise distort the
+physics if it pulled at full strength — an administrative or reference-only link between two
+nodes that are each already well-anchored elsewhere. Don't use it as a substitute for
+judging an edge unimportant; the label and connector type still carry that meaning.
+
 **When scaffolding a new project**, name connectors by relationship semantics, not by
 visual properties: `owns`, `controls`, `supplies`, `depends_on`, `funds`, `related_to`.
-The label can be more descriptive; the key should be short and unambiguous.
+The label can be more descriptive; the key should be short and unambiguous. Assign
+`physics_attraction` at the same time you assign labels — connectors carrying the domain's
+real signal should pull harder than administrative or structural ones.
 
 ---
 
@@ -263,6 +307,15 @@ app once the world is open.
 }
 ```
 
+**A note on the `"vault"` key name.** Current terminology calls a Filamental project a
+"project" or "folder" — not a "vault" — but the `world.json` schema still uses `vault` as
+the internal key for this settings block, and `colour` (not `color`) throughout both
+`entity_types.json` and `connector_types.json`. These are fixed schema field names, not
+terminology choices, and should never be renamed as part of a terminology or spelling pass
+over a project's content — the app reads these exact key names. Update prose, labels, and
+node content to current terminology and spelling conventions freely; leave schema keys
+alone.
+
 ---
 
 ## Properties — Guidance for Writing
@@ -281,6 +334,12 @@ a table: dates, amounts, codes, identifiers, statuses, quantities, jurisdictions
 
 Investigation world:
 ```yaml
+# The entity type carrying individual claims/matters (e.g. "venture", "allegation", "matter")
+properties:
+  evidentiary_status: under_investigation   # e.g. proven | under_investigation | reported_pattern | alleged_unresolved
+  amount: USD 2.1M
+  period: "2024-2025"
+
 # Person (political)
 properties:
   role: Minister of Infrastructure
@@ -407,3 +466,28 @@ Filamental versions:
 - `composition_mode: atomic` — always use this value
 - `child_view_id: ''` — always empty string
 - `metadata` in `world.json` — the audit log section will expand; leave defaults as shown
+
+---
+
+## Known Quirks
+
+**Concurrent writes while the project is open live in the app.** If a user has the project
+open in Filamental while you're also writing to the same folder, a save from the app and a
+write from you can occasionally collide. The most visible symptom is a `.filamental/*.json`
+config file (`entity_types.json`, `connector_types.json`, `world.json`) that reads back as
+truncated or invalid JSON — cut off mid-value, missing its closing braces — even though it
+looked complete moments earlier in a different read.
+
+This is a save-timing collision, not permanent data loss. Handle it as follows:
+1. Re-read the file — it may already have resolved by the time you check again.
+2. If it's still incomplete, reconstruct it from whatever partial content is visible in the
+   truncated read, rather than overwriting from your own cached copy of what the file used
+   to contain. If the user has been adjusting settings live in the app (physics sliders,
+   colours, etc.), those changes may be reflected in the partial file and must be preserved,
+   not clobbered.
+3. Re-validate as JSON (or re-parse the YAML frontmatter, for node files) after any repair,
+   before relying on it further.
+4. Don't state a cause to the user with more confidence than the evidence supports. What you
+   know is: the file was incomplete, here's what was recoverable, here's what was rewritten.
+   Whether it was the app's save, your own write, or a filesystem sync delay is often not
+   determinable from the file alone — say so rather than guessing.
