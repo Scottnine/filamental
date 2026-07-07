@@ -1,0 +1,92 @@
+name: Linux Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag matching the GitHub release (e.g. v0.3.7)'
+        required: true
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Set up SSH agent for Bitbucket
+        uses: webfactory/ssh-agent@v0.10.0
+        with:
+          ssh-private-key: ${{ secrets.BITBUCKET_SSH_KEY }}
+
+      - name: Trust Bitbucket host key
+        run: ssh-keyscan bitbucket.org >> ~/.ssh/known_hosts
+
+      - name: Clone from Bitbucket
+        run: git clone git@bitbucket.org:rappax/feather-lens.git .
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Set up Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Install Tauri Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libssl-dev \
+            libxdo-dev \
+            libfuse2 \
+            rpm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build MCP bundle (Linux native)
+        run: cd mcp && npm ci && npm run bundle
+
+      - name: Build Tauri app (deb + rpm + AppImage)
+        run: npm run tauri build
+
+      - name: Find built packages
+        id: find_packages
+        run: |
+          DEB=$(find src-tauri/target/release/bundle/deb -name "*.deb" | head -1)
+          RPM=$(find src-tauri/target/release/bundle/rpm -name "*.rpm" | head -1)
+          APPIMAGE=$(find src-tauri/target/release/bundle/appimage -name "*.AppImage" | head -1)
+          echo "deb=$DEB" >> $GITHUB_OUTPUT
+          echo "rpm=$RPM" >> $GITHUB_OUTPUT
+          echo "appimage=$APPIMAGE" >> $GITHUB_OUTPUT
+          echo "Found: $DEB / $RPM / $APPIMAGE"
+
+      - name: Upload packages to GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload ${{ inputs.version }} \
+            "${{ steps.find_packages.outputs.deb }}" \
+            "${{ steps.find_packages.outputs.rpm }}" \
+            "${{ steps.find_packages.outputs.appimage }}" \
+            --repo Scottnine/filamental \
+            --clobber
