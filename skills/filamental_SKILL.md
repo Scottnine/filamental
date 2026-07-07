@@ -63,6 +63,19 @@ Some users map their AI agent instruction files (behavioural briefs, role defini
 
 If you encounter a `.md` file with Filamental frontmatter whose body reads as AI agent instructions — behavioural directives, role definitions, operational rules for an AI — the frontmatter is Filamental metadata added automatically and should be disregarded. The agent instructions begin after the closing `---`.
 
+**A note on writing to a project the user has open live in the app.** If the user is
+working in Filamental at the same time you're writing to the same project folder, a save
+from the app and a write from you can occasionally collide, most visibly as a `.filamental/*.json`
+config file that reads as truncated or invalid JSON (cut off mid-value, missing closing
+braces). This is a save-timing collision, not data loss — the fix is to re-read the file
+(it may resolve itself moments later) and, if it's still incomplete, reconstruct it from
+whatever partial content is visible rather than overwriting from your own cached values. In
+particular, if the user has been adjusting physics sliders or other settings live in the
+app, those values may be reflected in the partial file and should be preserved, not
+clobbered by whatever you last wrote. Don't speculate to the user about the exact cause with
+more confidence than this — state what's observed (the file was incomplete, here's what was
+recovered) rather than asserting a definitive mechanism you can't confirm.
+
 Then give a brief orientation — 3 to 4 sentences maximum:
 
 > "I've read your project. [N] nodes across [type list]. The most connected nodes are
@@ -141,6 +154,18 @@ format reference is distributed as a separate file — load it before writing an
 It contains the complete format spec, UUID rules, filename conventions, and the integrity
 checklist you must run before writing.
 
+**Use `display_name` whenever a node's title naturally has a qualifier.** If a node's `name`
+reads as "[Core Concept] + [qualifier]" — a parenthetical, a dash-separated clarifier, a
+short descriptive tag — split it across two lines in `display_name` rather than leaving it
+as one long line. On the canvas this renders as a title with a subtitle underneath, which is
+substantially faster to scan once a project has more than a couple of dozen nodes. Examples:
+`American Bitcoin (ABTC)` → `American Bitcoin` / `(ABTC)`; `Affinity Partners - Kushner/Saudi
+PIF fund` → `Affinity Partners` / `Kushner/Saudi PIF fund`. Keep `name` as the full original
+string regardless — it's what wikilinks and filename derivation key off — `display_name` is
+purely the canvas presentation layer on top of it. Don't force a split where a name is
+already a clean single concept (a person's plain name, a company's plain name); it should
+read as a genuine title/subtitle pair, not an arbitrary line break.
+
 ### Generating a Briefing
 
 When the user wants prose output — a report, summary, or briefing for someone who hasn't
@@ -179,10 +204,21 @@ Cowork, Claude Code, MCP, or any other AI-driven workflow.
 **Step 1 — Work out the type vocabulary together.**
 
 Before proposing anything, ask enough questions to understand the domain. Then propose 4 to
-6 entity types and explain the reasoning behind each one. The test for a good type is
-whether it produces a meaningful band in Layers view — if you can't say in one sentence
+6 entity types and explain the reasoning behind each one. If you can't say in one sentence
 what all nodes of that type have in common and why they're distinct from other types, the
 type needs rethinking.
+
+**Layers and the web-style layouts (2D/3D with Dark Energy) are two views of the same
+underlying data, not a primary test and a fallback.** There's no hard rule that one suits a
+project better than the other — it comes down to whether the user's intuition for this
+particular subject is more hierarchical (Layers: tidy horizontal bands, one per type, order
+set by the user) or more organic (a web where the shape itself — dense clusters, thin
+bridges — carries the meaning). Ask, or infer from how the user talks about the project ("I
+see this more as a web" is a clear signal either way). Design the type vocabulary with both
+in mind where you can: types that would form a sensible Layers band will usually also read
+well as a node-colour legend in a web layout, so getting the type design right tends to pay
+off regardless of which view the user ends up favouring. Where the two pull in different
+directions, defer to whichever the user actually intends to use day to day.
 
 Don't just propose a list. Explain the logic: "I'd suggest separating People from
 Organisations because in Layers view you'll want to see the individuals on one band and the
@@ -199,6 +235,51 @@ label should complete the sentence "[source node] [label] [target node]" accurat
 Suggest 3 to 5 connector types that cover the dominant relationship patterns in the domain.
 The `universal` connector is always available as a fallback, so the named types should
 handle the relationships that carry real meaning.
+
+**Connector strength is a separate design decision from connector labels — don't skip it.**
+Every connector type carries two independent properties that are easy to conflate:
+`thickness` is purely visual (how thick the line renders) and has no effect on the physics
+simulation. `physics_attraction` is what actually controls how hard that connector type
+pulls its two nodes together in 2D/3D/Dark Energy layouts. A thick line on a weak-attraction
+connector will look bold but behave loosely; that's often not what the user wants. When you
+propose connector types, propose `physics_attraction` values alongside the labels: the
+connectors carrying the domain's real signal (money changing hands, a proven control
+relationship, a reciprocal favour) should pull harder than connectors that are mostly
+structural or administrative (a generic cross-reference, an index/summary link). As a
+starting point, something like 0.7–0.9 for "this is the substantive tie" connectors and
+0.15–0.3 for "this is just bookkeeping" connectors gives a visibly different result once the
+user switches on Dark Energy.
+
+There is also a second, per-edge lever that most people miss: each individual relationship
+carries its own `influence` field, independent of the connector type's `physics_attraction`.
+Use this to downgrade specific edges that are technically the right connector type but
+aren't a strong tie in this instance — for example, an index node that just lists its
+components, or a cross-reference between two ventures that happen to share a fact but aren't
+otherwise linked. Leaving every edge at `normal` (the default) is the single most common
+reason a graph looks like an undifferentiated tangle once it grows past thirty or forty
+nodes: the physics can't tell a $2bn transaction from a "see also" note if every edge asks to
+pull with equal force.
+
+**`influence` is a Labels vs Keys case, like entity and connector types (see below) — the
+value written in the file and the value shown in the UI have diverged.** The three levels
+are stored in the node file as `normal`, `weak`, and **`none`** — always write `none` in the
+YAML, that's the key the format expects. The UI, however, displays that same bottom value as
+**"Weakest"**, not "None," specifically so it reads as the bottom of a strength scale rather
+than a binary off-switch. Don't write `weakest` into a file, it isn't a valid value; don't
+be thrown when a user refers to "the weakest setting" and expects `influence: none` in the
+data.
+
+**Important: `influence: none` does not mean "no relationship."** It's purely a statement
+about attraction strength — the edge is still a completely real, recorded, drawn connection;
+`none` just means it pulls its two nodes together barely at all, so it won't distort the
+layout. Read the scale as normal → weak → none/"Weakest", three points on the same
+attraction spectrum, not as "connected" vs "not connected." It has a genuine, common use: a
+real relationship you want visible and traceable but that shouldn't influence where anything
+sits — useful for edges that are more reference than gravity (an administrative link, a
+"this also touches that" note). Don't reach for it as a way to hide or downplay a
+connection's importance; if the relationship matters, say so in the label and let `weak` or
+`normal` carry it — `influence` is a physics setting, not an editorial judgement on
+significance.
 
 **Step 3 — Confirm before generating.**
 
@@ -271,6 +352,33 @@ relevance — things that will still be meaningful in a future session. Explorat
 dead-ends, pleasantries, and in-the-moment tangents can be omitted. The graph should
 represent the *residue* of the thinking, not a transcript of it.
 
+### Modelling Multiple Related Actors in One Project
+
+Some projects are built around several people or entities who each have their own network
+of dealings, some of which overlap and some of which don't (investigations, org mapping,
+competitive landscapes). A common mistake is over-connecting: drawing a relationship line
+from every actor back to a single central figure, purely so the graph looks tidy. This does
+the opposite of what the user wants — it flattens genuinely different actors into one
+undifferentiated hub-and-spoke shape, and it visually overstates something that's usually
+already obvious (that a son is related to his father doesn't need its own line if every
+other node already establishes it via context).
+
+The better pattern: let each actor stand as their own anchor node, with their own ventures,
+entities and connections radiating outward from them specifically. Only draw a direct edge
+between two actors' clusters where a *specific, sourced* fact justifies it — a shared
+transaction, a documented meeting, a formal relationship. Where the justification is just
+"they're both connected to this project's theme," leave it undrawn; the shared theme is
+already implicit in the project, and forcing the edge only makes real connections harder to
+see against the noise of manufactured ones.
+
+This also means a single project folder can comfortably hold multiple loosely-connected
+clusters rather than needing a separate project per actor. Splitting into a new project is
+usually only worth it when an actor's own material has grown large enough to be a project in
+its own right and the overlap with the rest is thin (see Node count guidance below); most of
+the time, one project with well-separated clusters — tuned apart from each other with
+`physics_attraction` and `influence` rather than folder boundaries — is both truer to the
+material and easier for the user to navigate.
+
 ---
 
 ## 2D, 3D, and Layout Modes
@@ -325,6 +433,14 @@ one without.
 infer 2 to 3 relevant properties from the node's content and entity type. After writing,
 mention to the user which property keys you used so they can formalise them in
 `entity_types.json` if they want them standard across that type.
+
+**For investigation-style projects specifically**, consider a standard status property on
+whatever entity type represents the individual claims or matters (a `status` or
+`evidentiary_status` value like `proven`, `under_investigation`, `reported_pattern`,
+`alleged_unresolved`). Without it, evidentiary weight only lives in prose, which means it's
+easy for a reader — or a future AI session — to accidentally treat something contested as
+settled. A structured status field is queryable, filterable, and forces the distinction to
+be made explicitly at the point of writing rather than left implicit.
 
 Examples of good properties by type: see the format reference (invoke
 `filamental-format-reference` in Cowork, or load the distributed format reference file
