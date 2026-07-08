@@ -113,3 +113,23 @@ jobs:
           PATCHES="$PATCHES" node scripts/patch-worker-platform.js
           cd cloudflare
           npx --yes wrangler@latest deploy
+
+      - name: Sync deployed worker.js back to Bitbucket
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add cloudflare/worker.js
+          if git diff --cached --quiet; then
+            echo "No worker.js changes to sync."
+          else
+            git commit -m "chore(worker): sync linux updater entry for ${{ inputs.version }}"
+            # Mac/Linux workflows can run concurrently and both touch this
+            # file — retry with rebase on a non-fast-forward push.
+            for i in 1 2 3 4 5; do
+              git push origin HEAD:main && break
+              echo "Push rejected, rebasing onto latest main (attempt $i)..."
+              git fetch origin main
+              git rebase origin/main
+              sleep 5
+            done
+          fi
