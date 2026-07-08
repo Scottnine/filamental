@@ -127,7 +127,13 @@ jobs:
           TARGZ_NAME=$(basename "${{ steps.find_dmg.outputs.targz }}")
           TARGZ_URL="https://github.com/Scottnine/filamental/releases/download/${{ inputs.version }}/${TARGZ_NAME}"
           SIG=$(cat "${{ steps.find_dmg.outputs.targz_sig }}")
-          PATCHES=$(node -e "console.log(JSON.stringify({SIGNATURE_MAC: process.argv[1], APP_TARGZ_URL: process.argv[2]}))" "$SIG" "$TARGZ_URL")
+          VERSION_MAC="${{ inputs.version }}"
+          VERSION_MAC="${VERSION_MAC#v}"
+          PUB_DATE_MAC=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          # VERSION_MAC gates the update check for darwin targets — this is what
+          # stops a Windows-only release.sh bump from making Mac clients think
+          # there's an update when this platform's build hasn't actually moved.
+          PATCHES=$(node -e "console.log(JSON.stringify({SIGNATURE_MAC: process.argv[1], APP_TARGZ_URL: process.argv[2], VERSION_MAC: process.argv[3], PUB_DATE_MAC: process.argv[4]}))" "$SIG" "$TARGZ_URL" "$VERSION_MAC" "$PUB_DATE_MAC")
           PATCHES="$PATCHES" node scripts/patch-worker-platform.js
           cd cloudflare
           npx --yes wrangler@latest deploy
