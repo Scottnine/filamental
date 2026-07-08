@@ -126,6 +126,8 @@ jobs:
         run: |
           TARGZ_NAME=$(basename "${{ steps.find_dmg.outputs.targz }}")
           TARGZ_URL="https://github.com/Scottnine/filamental/releases/download/${{ inputs.version }}/${TARGZ_NAME}"
+          DMG_NAME=$(basename "${{ steps.find_dmg.outputs.path }}")
+          DMG_URL="https://github.com/Scottnine/filamental/releases/download/${{ inputs.version }}/${DMG_NAME}"
           SIG=$(cat "${{ steps.find_dmg.outputs.targz_sig }}")
           VERSION_MAC="${{ inputs.version }}"
           VERSION_MAC="${VERSION_MAC#v}"
@@ -133,7 +135,9 @@ jobs:
           # VERSION_MAC gates the update check for darwin targets — this is what
           # stops a Windows-only release.sh bump from making Mac clients think
           # there's an update when this platform's build hasn't actually moved.
-          PATCHES=$(node -e "console.log(JSON.stringify({SIGNATURE_MAC: process.argv[1], APP_TARGZ_URL: process.argv[2], VERSION_MAC: process.argv[3], PUB_DATE_MAC: process.argv[4]}))" "$SIG" "$TARGZ_URL" "$VERSION_MAC" "$PUB_DATE_MAC")
+          # DOWNLOAD_DMG is the separate manual-download link (/download/latest/mac)
+          # — distinct from APP_TARGZ_URL, which only the in-app updater uses.
+          PATCHES=$(node -e "console.log(JSON.stringify({SIGNATURE_MAC: process.argv[1], APP_TARGZ_URL: process.argv[2], VERSION_MAC: process.argv[3], PUB_DATE_MAC: process.argv[4], DOWNLOAD_DMG: process.argv[5]}))" "$SIG" "$TARGZ_URL" "$VERSION_MAC" "$PUB_DATE_MAC" "$DMG_URL")
           PATCHES="$PATCHES" node scripts/patch-worker-platform.js
           cd cloudflare
           npx --yes wrangler@latest deploy
