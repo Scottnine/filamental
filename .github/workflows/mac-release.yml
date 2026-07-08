@@ -92,20 +92,42 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          # Makes `tauri build` also emit the updater artifact (.app.tar.gz + .sig),
+          # signed with the same key release.sh uses for the Windows EXE.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         run: npm run tauri build -- --target universal-apple-darwin
 
-      - name: Find built DMG
+      - name: Find built DMG and updater artifact
         id: find_dmg
         run: |
           DMG=$(find src-tauri/target/universal-apple-darwin/release/bundle/dmg -name "*.dmg" | head -1)
+          TARGZ=$(find src-tauri/target/universal-apple-darwin/release/bundle/macos -name "*.app.tar.gz" | head -1)
           echo "path=$DMG" >> $GITHUB_OUTPUT
+          echo "targz=$TARGZ" >> $GITHUB_OUTPUT
+          echo "targz_sig=${TARGZ}.sig" >> $GITHUB_OUTPUT
           echo "Found DMG: $DMG"
+          echo "Found updater artifact: $TARGZ"
 
-      - name: Upload DMG to GitHub release
+      - name: Upload DMG and updater artifact to GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release upload ${{ inputs.version }} \
             "${{ steps.find_dmg.outputs.path }}" \
+            "${{ steps.find_dmg.outputs.targz }}" \
             --repo Scottnine/filamental \
             --clobber
+
+      - name: Update Cloudflare Worker (mac updater entry)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          TARGZ_NAME=$(basename "${{ steps.find_dmg.outputs.targz }}")
+          TARGZ_URL="https://github.com/Scottnine/filamental/releases/download/${{ inputs.version }}/${TARGZ_NAME}"
+          SIG=$(cat "${{ steps.find_dmg.outputs.targz_sig }}")
+          PATCHES=$(node -e "console.log(JSON.stringify({SIGNATURE_MAC: process.argv[1], APP_TARGZ_URL: process.argv[2]}))" "$SIG" "$TARGZ_URL")
+          PATCHES="$PATCHES" node scripts/patch-worker-platform.js
+          cd cloudflare
+          npx --yes wrangler@latest deploy
