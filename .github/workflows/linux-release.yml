@@ -67,6 +67,13 @@ jobs:
         run: cd mcp && npm ci && npm run bundle
 
       - name: Build Tauri app (deb + rpm + AppImage)
+        env:
+          # Makes `tauri build` also emit the AppImage's updater signature
+          # (.AppImage.sig), signed with the same key release.sh uses for
+          # the Windows EXE. deb/rpm are package-manager-installed and have
+          # no updater artifact — only AppImage supports in-app auto-update.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         run: npm run tauri build
 
       - name: Find built packages
@@ -78,6 +85,7 @@ jobs:
           echo "deb=$DEB" >> $GITHUB_OUTPUT
           echo "rpm=$RPM" >> $GITHUB_OUTPUT
           echo "appimage=$APPIMAGE" >> $GITHUB_OUTPUT
+          echo "appimage_sig=${APPIMAGE}.sig" >> $GITHUB_OUTPUT
           echo "Found: $DEB / $RPM / $APPIMAGE"
 
       - name: Upload packages to GitHub release
@@ -90,3 +98,18 @@ jobs:
             "${{ steps.find_packages.outputs.appimage }}" \
             --repo Scottnine/filamental \
             --clobber
+
+      - name: Update Cloudflare Worker (linux download links + updater entry)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          BASE="https://github.com/Scottnine/filamental/releases/download/${{ inputs.version }}"
+          DEB_URL="${BASE}/$(basename "${{ steps.find_packages.outputs.deb }}")"
+          RPM_URL="${BASE}/$(basename "${{ steps.find_packages.outputs.rpm }}")"
+          APPIMAGE_URL="${BASE}/$(basename "${{ steps.find_packages.outputs.appimage }}")"
+          SIG=$(cat "${{ steps.find_packages.outputs.appimage_sig }}")
+          PATCHES=$(node -e "console.log(JSON.stringify({DOWNLOAD_DEB: process.argv[1], DOWNLOAD_RPM: process.argv[2], DOWNLOAD_APPIMAGE: process.argv[3], SIGNATURE_LINUX: process.argv[4]}))" "$DEB_URL" "$RPM_URL" "$APPIMAGE_URL" "$SIG")
+          PATCHES="$PATCHES" node scripts/patch-worker-platform.js
+          cd cloudflare
+          npx --yes wrangler@latest deploy
