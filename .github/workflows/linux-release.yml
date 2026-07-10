@@ -66,6 +66,15 @@ jobs:
       - name: Build MCP bundle (Linux native)
         run: cd mcp && npm ci && npm run bundle
 
+      - name: Clean stale bundle output (Rust cache can carry over old-version artifacts)
+        # actions/cache's restore-keys prefix fallback can restore a target/ dir from
+        # an older release when Cargo.lock's hash doesn't exactly match, leaving a
+        # stale-versioned .rpm/.deb/.AppImage sitting alongside this run's fresh build.
+        # "Find built packages" below (find | head -1) has no way to tell them apart,
+        # so it can silently upload the OLD file under the NEW version's release —
+        # this shipped v0.3.9 with a v0.3.7-named .rpm until caught and fixed here.
+        run: rm -rf src-tauri/target/release/bundle
+
       - name: Build Tauri app (deb + rpm + AppImage)
         env:
           # Makes `tauri build` also emit the AppImage's updater signature
