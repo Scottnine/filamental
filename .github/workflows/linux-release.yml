@@ -66,15 +66,6 @@ jobs:
       - name: Build MCP bundle (Linux native)
         run: cd mcp && npm ci && npm run bundle
 
-      - name: Clean stale bundle output (Rust cache can carry over old-version artifacts)
-        # actions/cache's restore-keys prefix fallback can restore a target/ dir from
-        # an older release when Cargo.lock's hash doesn't exactly match, leaving a
-        # stale-versioned .rpm/.deb/.AppImage sitting alongside this run's fresh build.
-        # "Find built packages" below (find | head -1) has no way to tell them apart,
-        # so it can silently upload the OLD file under the NEW version's release —
-        # this shipped v0.3.9 with a v0.3.7-named .rpm until caught and fixed here.
-        run: rm -rf src-tauri/target/release/bundle
-
       - name: Build Tauri app (deb + rpm + AppImage)
         env:
           # Makes `tauri build` also emit the AppImage's updater signature
@@ -130,6 +121,12 @@ jobs:
           npx --yes wrangler@latest deploy
 
       - name: Sync deployed worker.js back to Bitbucket
+        env:
+          # Repo-level SSH access keys on Bitbucket Cloud are read-only by
+          # design (no write-access toggle exists) — pushes use an account
+          # API token over HTTPS instead. Reads (clone/fetch) still use the
+          # SSH key above, which works fine for that.
+          BITBUCKET_PUSH_URL: https://x-bitbucket-api-token-auth:${{ secrets.BITBUCKET_API_TOKEN }}@bitbucket.org/rappax/feather-lens.git
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -141,7 +138,7 @@ jobs:
             # Mac/Linux workflows can run concurrently and both touch this
             # file — retry with rebase on a non-fast-forward push.
             for i in 1 2 3 4 5; do
-              git push origin HEAD:main && break
+              git push "$BITBUCKET_PUSH_URL" HEAD:main && break
               echo "Push rejected, rebasing onto latest main (attempt $i)..."
               git fetch origin main
               git rebase origin/main
