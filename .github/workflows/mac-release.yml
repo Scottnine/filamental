@@ -86,6 +86,14 @@ jobs:
           mkdir -p ~/.private_keys
           echo "$APPLE_API_KEY_CONTENT" > ~/.private_keys/AuthKey_${{ secrets.APPLE_API_KEY_ID }}.p8
 
+      - name: Clean stale bundle output
+        # Same cache-restore-keys staleness risk as linux-release.yml (see
+        # its "Clean stale bundle output" step) — actions/cache can restore
+        # a target/ dir from an older release, leaving a stale-versioned
+        # .dmg sitting alongside the freshly-built one with no way for
+        # "Find built DMG" below to prefer the new one.
+        run: rm -rf src-tauri/target/universal-apple-darwin/release/bundle
+
       - name: Build Tauri app (universal macOS binary)
         env:
           APPLE_SIGNING_IDENTITY: "Developer ID Application: Scott Turnbull (V9MB7JL7JZ)"
