@@ -143,6 +143,12 @@ jobs:
           npx --yes wrangler@latest deploy
 
       - name: Sync deployed worker.js back to Bitbucket
+        env:
+          # Repo-level SSH access keys on Bitbucket Cloud are read-only by
+          # design (no write-access toggle exists) — pushes use an account
+          # API token over HTTPS instead. Reads (clone/fetch) still use the
+          # SSH key above, which works fine for that.
+          BITBUCKET_PUSH_URL: https://x-bitbucket-api-token-auth:${{ secrets.BITBUCKET_API_TOKEN }}@bitbucket.org/rappax/feather-lens.git
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -154,7 +160,7 @@ jobs:
             # Mac/Linux workflows can run concurrently and both touch this
             # file — retry with rebase on a non-fast-forward push.
             for i in 1 2 3 4 5; do
-              git push origin HEAD:main && break
+              git push "$BITBUCKET_PUSH_URL" HEAD:main && break
               echo "Push rejected, rebasing onto latest main (attempt $i)..."
               git fetch origin main
               git rebase origin/main
