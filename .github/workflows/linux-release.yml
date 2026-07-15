@@ -7,6 +7,18 @@ on:
         description: 'Version tag matching the GitHub release (e.g. v0.3.7)'
         required: true
 
+# Shared with mac-release.yml so the two never deploy to Cloudflare at the
+# same time. Each workflow patches its own platform's fields onto a local
+# git-clone snapshot of cloudflare/worker.js taken at job start and deploys
+# independently — if both ran concurrently, whichever deploys last wins with
+# a stale snapshot of the other's just-published fields, silently reverting
+# it (hit for real on the v0.3.13 release: Linux's deploy clobbered Mac's
+# fresh entry back to the previous version). Serializing the whole job is
+# the simplest way to close that window completely.
+concurrency:
+  group: filamental-release-cloudflare-worker
+  cancel-in-progress: false
+
 jobs:
   build-linux:
     runs-on: ubuntu-22.04
@@ -126,6 +138,12 @@ jobs:
           # there's an update when this platform's build hasn't actually moved.
           PATCHES=$(node -e "console.log(JSON.stringify({DOWNLOAD_DEB: process.argv[1], DOWNLOAD_RPM: process.argv[2], DOWNLOAD_APPIMAGE: process.argv[3], SIGNATURE_LINUX: process.argv[4], VERSION_LINUX: process.argv[5], PUB_DATE_LINUX: process.argv[6]}))" "$DEB_URL" "$RPM_URL" "$APPIMAGE_URL" "$SIG" "$VERSION_LINUX" "$PUB_DATE_LINUX")
           PATCHES="$PATCHES" node scripts/patch-worker-platform.js
+          # Persisted for the sync-back step below, so a push retry can
+          # re-derive the exact same patch on top of a freshly-fetched main
+          # instead of needing a rebase.
+          echo "PATCHES<<WORKER_PATCHES_EOF" >> "$GITHUB_ENV"
+          echo "$PATCHES" >> "$GITHUB_ENV"
+          echo "WORKER_PATCHES_EOF" >> "$GITHUB_ENV"
           cd cloudflare
           npx --yes wrangler@latest deploy
 
@@ -144,13 +162,23 @@ jobs:
             echo "No worker.js changes to sync."
           else
             git commit -m "chore(worker): sync linux updater entry for ${{ inputs.version }}"
-            # Mac/Linux workflows can run concurrently and both touch this
-            # file — retry with rebase on a non-fast-forward push.
+            # Defensive retry — mac-release.yml and linux-release.yml now
+            # share a concurrency group so they no longer deploy at the same
+            # time, but this still guards against any other writer (e.g. a
+            # manual push) landing in the gap between our clone and this
+            # push. Deliberately NOT `git rebase`: the build leaves other
+            # tracked files dirty (Cargo.lock, mcp bundle output), and
+            # rebase refuses to run against anything but a fully clean
+            # working tree. Hard-reset to the new main and re-apply the same
+            # deterministic patch instead — no clean-tree requirement.
             for i in 1 2 3 4 5; do
               git push "$BITBUCKET_PUSH_URL" HEAD:main && break
-              echo "Push rejected, rebasing onto latest main (attempt $i)..."
+              echo "Push rejected (attempt $i) — resetting to latest main and re-applying this platform's patch..."
               git fetch origin main
-              git rebase origin/main
+              git reset --hard origin/main
+              PATCHES="$PATCHES" node scripts/patch-worker-platform.js
+              git add cloudflare/worker.js
+              git commit -m "chore(worker): sync linux updater entry for ${{ inputs.version }}"
               sleep 5
             done
           fi
