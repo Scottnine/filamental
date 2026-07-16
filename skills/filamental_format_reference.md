@@ -38,7 +38,7 @@ relationships:
   label: short descriptive label                   # OPTIONAL — labels this specific connection
   influence: normal                                # normal | weak | none (UI shows the last as "Weakest" — see Labels vs Keys)
   properties: {}
-attachments: []                             # Always empty when generating; user adds via UI
+attachments: []                             # Always empty when generating; user adds via UI. Not scriptable — see Known Quirks
 composition_mode: atomic                    # Always atomic for standard nodes
 child_view_id: ''                           # Always empty string for standard nodes
 has_notes: true                             # true if markdown body is non-empty; false if blank
@@ -491,3 +491,22 @@ This is a save-timing collision, not permanent data loss. Handle it as follows:
    know is: the file was incomplete, here's what was recoverable, here's what was rewritten.
    Whether it was the app's save, your own write, or a filesystem sync delay is often not
    determinable from the file alone — say so rather than guessing.
+
+**Attachments cannot be added programmatically.** The `attachments: []` field is not
+something to populate by hand, and there is no tool call, API, or file-placement trick that
+creates a real attachment. It is drag-and-drop only, inside the app. Do not satisfy an
+"attach a file" request by copying a file into `.filamental/assets/<node-id>/` and reporting
+the node as having an attachment — that folder is where the app stores things like
+`cover_image` once *it* has written them, but a file placed there manually is never picked
+up or referenced by the node, and `attachments` will still read back as `[]`. If asked to
+get a file "into" a node and there's a live MCP connection to the project (`mcp__filamental__*`
+tools resolving successfully), that MCP has no attachment parameter either — check with
+`get_node` before claiming success, don't assume a write worked. The correct approach: create
+the file, leave it somewhere visible in the project folder (not inside `.filamental/`), point
+to it by name in the node's notes, and tell the user it needs manual drag-and-drop — there is
+no scripted alternative. Note that dragging a file into the app this way creates a distinct
+file-backed node (type defaults to `unclassified`, properties carry `_asset_rel_path` and
+`_asset_ext`, and the node has no markdown file of its own), not a markdown node with an
+attachment — if the user wants a document to be independently clickable-to-open from the
+graph rather than attached to an existing node, that file-node behaviour is probably what
+they actually want; confirm which before building either one.
