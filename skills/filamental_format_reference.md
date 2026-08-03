@@ -34,7 +34,7 @@ properties:
 relationships:
 - target: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx   # UUID of connected node
   type: connector_type_key                         # Must match a key in connector_types.json
-  direction: none                                  # none | incoming | outgoing
+  direction: none                                  # none | outgoing | incoming | bidirectional — see Arrow direction
   label: short descriptive label                   # OPTIONAL — labels this specific connection
   influence: normal                                # normal | weak | none (UI shows the last as "Weakest" — see Labels vs Keys)
   properties: {}
@@ -54,6 +54,31 @@ Leave the body blank only if there is genuinely nothing to say about this node y
 Populated notes make the world significantly more useful for both the user and for AI
 analysis.
 ```
+
+---
+
+## Arrow direction
+
+`direction` on a relationship takes exactly one of four values. Anything else is invalid: the app cannot render it, so it draws as a plain line and the arrow you asked for silently does not appear.
+
+| Value | What is drawn |
+|---|---|
+| `none` | A plain line, no arrowhead (default) |
+| `outgoing` | Arrowhead at the **target** end |
+| `incoming` | Arrowhead back at the **source** end |
+| `bidirectional` | Arrowheads at both ends |
+
+**These are written relative to the relationship's own source and target.** The source is the node whose file the relationship lives in; the target is the `target:` UUID. So `outgoing` means "points away from the node this block is written in".
+
+This has a consequence worth understanding, because it is a common source of mistakes.
+
+The same arrow has two equally valid encodings. An arrow pointing from A to B can be written as `outgoing` in A's file, or as `incoming` in B's file. Both draw the identical line on screen. Which one a given world uses depends purely on which node the user happened to drag from when creating the connector, and that is invisible once drawn.
+
+Therefore:
+
+- **Never conclude a node has no outbound links just because its own file lists none.** The arrows may be recorded in the other nodes' files. To see everything touching a node you must look at both directions.
+- **Never assume the file a relationship lives in is the "from" end.** It is only the storage location.
+- When reading connections through the `get_connections` tool, the `direction` it returns is already flipped for you and is stated relative to the node you asked about, matching what the user sees. Its `stored_on` field tells you which file holds the record, and is relevant only if you are editing that file directly.
 
 ---
 
