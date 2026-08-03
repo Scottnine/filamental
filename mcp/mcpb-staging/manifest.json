@@ -1,0 +1,90 @@
+{
+  "manifest_version": "0.3",
+  "name": "filamental",
+  "display_name": "Filamental",
+  "version": "0.2.7",
+  "description": "Connect Claude to your Filamental knowledge graph. Search nodes, follow connections, and read or write vault content directly from Claude Desktop -- no copy-paste required.",
+  "long_description": "Filamental is a 3D knowledge graph desktop app. This extension gives Claude live read/write access to your vault -- the same data the app uses -- so you can ask questions, find connections, and build out your graph entirely from conversation.\n\nNo vault path needed. The extension reads whichever world you have open in Filamental and switches automatically when you change worlds.\n\n**What Claude can do:**\n- Search across all node names, notes, and properties\n- Retrieve full node records and follow connections\n- Traverse subgraphs to understand clusters of related content\n- Create, update, and delete nodes\n- Add and remove edges between nodes\n\nChanges made through Claude appear immediately the next time you open the vault in Filamental.\n\n**Requires:** Filamental desktop app installed and at least one vault opened.",
+  "author": {
+    "name": "Scott Turnbull",
+    "email": "cosimo@filamental.space",
+    "url": "https://github.com/Scottnine"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Scottnine/filamental"
+  },
+  "homepage": "https://filamental.app",
+  "support": "https://github.com/Scottnine/filamental/issues",
+  "icon": "icon.png",
+  "keywords": [
+    "knowledge-graph",
+    "notes",
+    "graph",
+    "productivity",
+    "filamental"
+  ],
+  "license": "MIT",
+  "privacy_policies": [],
+  "compatibility": {
+    "platforms": ["win32"]
+  },
+  "server": {
+    "type": "node",
+    "entry_point": "bundle/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/bundle/index.js"]
+    }
+  },
+  "tools": [
+    {
+      "name": "get_vault_info",
+      "description": "Return summary counts (nodes, edges) and the entity and connector type names configured for this vault."
+    },
+    {
+      "name": "list_node_types",
+      "description": "Return the full entity type configuration for this vault."
+    },
+    {
+      "name": "list_connector_types",
+      "description": "Return the full connector type configuration for this vault."
+    },
+    {
+      "name": "search_nodes",
+      "description": "Full-text search across node names, note bodies and property values. Returns matching nodes with a contextual snippet."
+    },
+    {
+      "name": "get_node",
+      "description": "Retrieve the full node record for a given entity UUID."
+    },
+    {
+      "name": "get_connections",
+      "description": "Get all edges connected to a node, with source and target names resolved."
+    },
+    {
+      "name": "get_subgraph",
+      "description": "BFS traversal from a root node collecting all reachable nodes and edges up to a given hop depth (max 3)."
+    },
+    {
+      "name": "create_node",
+      "description": "Create a new node -- writes a markdown file and updates the SQLite index."
+    },
+    {
+      "name": "update_node",
+      "description": "Update an existing node; omitted fields are unchanged."
+    },
+    {
+      "name": "delete_node",
+      "description": "Delete a node and remove it from the index and all relationships."
+    },
+    {
+      "name": "create_edge",
+      "description": "Add a relationship between two nodes."
+    },
+    {
+      "name": "delete_edge",
+      "description": "Remove a relationship between two nodes."
+    }
+  ]
+}

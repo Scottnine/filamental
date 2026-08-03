@@ -1,6 +1,7 @@
 {
   "name": "filamental-mcp",
-  "version": "0.2.2",
+  "version": "0.2.7",
+  "mcpName": "io.github.Scottnine/filamental",
   "description": "MCP server exposing your Filamental vault to AI assistants (Claude, Claude Code, etc.)",
   "type": "module",
   "main": "dist/index.js",
@@ -18,7 +19,7 @@
     "knowledge-graph",
     "ai"
   ],
-  "author": "BlackCat Marketing LLC",
+  "author": "Filamental",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -37,7 +38,7 @@
     "dev": "tsx src/index.ts"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "better-sqlite3": "^12.10.0",
     "js-yaml": "^4.2.0"
   },

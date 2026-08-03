@@ -70,11 +70,30 @@ function resolveDbPath(vaultPath: string, explicitDb?: string): string {
   return join(vaultPath, '.filamental', 'filamental.db')
 }
 
+// ── Schema compatibility ──────────────────────────────────────────────────────
+// Must match SCHEMA_VERSION in src-tauri/src/index.rs
+
+const SUPPORTED_SCHEMA_VERSION = 6
+
+function schemaVersionHint(detected: number): string {
+  if (detected > SUPPORTED_SCHEMA_VERSION) {
+    return (
+      `Version mismatch: your Filamental app uses schema v${detected} but this MCP only supports v${SUPPORTED_SCHEMA_VERSION}. ` +
+      `To fix:\n  1. Open a terminal\n  2. Run: npm update -g filamental-mcp\n  3. Restart Claude Desktop`
+    )
+  }
+  return (
+    `Version mismatch: this MCP expects schema v${SUPPORTED_SCHEMA_VERSION} but detected v${detected}. ` +
+    `To fix:\n  1. Download the latest Filamental app at https://filamental.app\n  2. Install it\n  3. Restart Claude Desktop`
+  )
+}
+
 // ── State shared across reconnects ────────────────────────────────────────────
 
 interface ActiveState {
   vaultPath: string
   db: Database.Database
+  schemaHint: string | null
 }
 
 let activeState: ActiveState | null = null
@@ -88,7 +107,23 @@ function openVault(vaultPath: string, explicitDb?: string): ActiveState {
     )
   }
   const db = new Database(dbPath)
-  return { vaultPath, db }
+
+  // Filamental stores its schema version in a schema_meta table (see apply_schema()
+  // in src-tauri/src/index.rs) — NOT via SQLite's PRAGMA user_version, which the
+  // Rust side never touches and which therefore always reads 0.
+  const versionRow = db
+    .prepare("SELECT value FROM schema_meta WHERE key = 'version'")
+    .get() as { value: string } | undefined
+  const schemaVersion = versionRow ? Number(versionRow.value) : 0
+  let schemaHint: string | null = null
+
+  if (schemaVersion !== SUPPORTED_SCHEMA_VERSION) {
+    schemaHint = schemaVersionHint(schemaVersion)
+    // Log to stderr only — user never sees this in normal operation
+    console.error(`[filamental-mcp] warning: ${schemaHint}`)
+  }
+
+  return { vaultPath, db, schemaHint }
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -157,6 +192,7 @@ async function main(): Promise<void> {
   const server = createServer(
     () => activeState!.db,
     () => activeState!.vaultPath,
+    () => activeState!.schemaHint,
   )
 
   const transport = new StdioServerTransport()

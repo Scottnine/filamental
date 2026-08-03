@@ -181,8 +181,19 @@ function upsertEntity(db: Database.Database, node: NodeRecord, filePath: string,
   const now = node.modified
   const mtime = fileMtimeSecs(filePath)
 
+  // Rust NodeData uses #[serde(rename = "type")] for entity_type, so data_json
+  // must use "type" as the key — not "entity_type" — or get_all_entities silently
+  // drops the node during deserialization. RelationshipInstance has the same
+  // #[serde(rename = "type")] on its rel_type field — miss that rename here too
+  // and the whole node (not just its relationships) fails to parse.
+  const { entity_type, ...nodeRest } = node
   const dataJson = JSON.stringify({
-    ...node,
+    ...nodeRest,
+    type: entity_type,
+    relationships: node.relationships.map(({ rel_type, ...relRest }) => ({
+      ...relRest,
+      type: rel_type,
+    })),
     has_notes: body.trim().length > 0,
   })
 
@@ -284,7 +295,7 @@ const TOOLS = [
   },
   {
     name: 'get_node',
-    description: 'Retrieve full node data for a given entity UUID.',
+    description: 'Retrieve full node data for a given entity UUID, including the markdown note body in the `notes` field.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -296,16 +307,27 @@ const TOOLS = [
   {
     name: 'get_connections',
     description:
-      'Get all edges connected to a node. Each result includes the resolved ' +
-      'name and type of both the source and target.',
+      'Get every edge connected to a node. Each result is stated from the point of ' +
+      'view of the node you asked about: `node` is that node, `other` is the node at ' +
+      'the far end, and `direction` says where the arrowhead is drawn as seen from ' +
+      '`node` — "outgoing" points away at `other`, "incoming" points back at `node`, ' +
+      '"bidirectional" points both ways, "none" is a plain line with no arrow. ' +
+      'This is what the user actually sees on the graph. It is deliberately not the ' +
+      'raw stored value, which is relative to whichever end the connector happened to ' +
+      'be drawn from and is invisible to the user. `stored_on` names the node whose ' +
+      'file holds the relationship, and matters only when editing that file directly.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         id: { type: 'string', description: 'Entity UUID' },
         direction: {
           type: 'string',
-          enum: ['all', 'outgoing', 'incoming'],
-          description: 'Filter by whether the node is source or target (default "all")',
+          enum: ['all', 'outgoing', 'incoming', 'undirected'],
+          description:
+            'Filter by what the arrow does, as seen from this node (default "all"). ' +
+            '"outgoing" = arrow points away from it, "incoming" = arrow points at it, ' +
+            '"undirected" = plain line with no arrow. A bidirectional edge matches both ' +
+            '"outgoing" and "incoming", because it genuinely points both ways.',
         },
       },
       required: ['id'],
@@ -379,7 +401,7 @@ const TOOLS = [
             properties: {
               target:    { type: 'string', description: 'Target node UUID' },
               rel_type:  { type: 'string', description: 'Connector type key' },
-              direction: { type: 'string', enum: ['none', 'source', 'target'] },
+              direction: { type: 'string', enum: ['none', 'incoming', 'outgoing'] },
               label:     { type: 'string' },
               influence: { type: 'string', enum: ['normal', 'weak', 'none'] },
               properties: { type: 'object', additionalProperties: { type: 'string' } },
@@ -414,7 +436,7 @@ const TOOLS = [
             properties: {
               target:    { type: 'string' },
               rel_type:  { type: 'string' },
-              direction: { type: 'string', enum: ['none', 'source', 'target'] },
+              direction: { type: 'string', enum: ['none', 'incoming', 'outgoing'] },
               label:     { type: 'string' },
               influence: { type: 'string', enum: ['normal', 'weak', 'none'] },
               properties: { type: 'object', additionalProperties: { type: 'string' } },
@@ -455,8 +477,12 @@ const TOOLS = [
         rel_type:   { type: 'string', description: 'Connector type key' },
         direction:  {
           type: 'string',
-          enum: ['none', 'source', 'target'],
-          description: 'Arrow direction (default "none")',
+          enum: ['none', 'outgoing', 'incoming', 'bidirectional'],
+          description:
+            'Where the arrowhead is drawn, stated relative to source_id → target_id. ' +
+            '"outgoing" draws it at target_id, "incoming" draws it back at source_id, ' +
+            '"bidirectional" draws both, "none" is a plain line with no arrow (default). ' +
+            'Note these are the only accepted values — anything else is rejected.',
         },
         label:      { type: 'string', description: 'Optional edge label text' },
         influence:  {
@@ -542,14 +568,72 @@ function toolGetNode(
 ): unknown {
   const id = String(args.id ?? '')
   const row = db
-    .prepare('SELECT data_json FROM entities WHERE id = ?')
+    .prepare('SELECT file_path, data_json FROM entities WHERE id = ?')
     .get(id) as Row | undefined
 
   if (!row) {
     throw new McpError(ErrorCode.InvalidParams, `Node not found: ${id}`)
   }
 
-  return JSON.parse(str(row['data_json'])) as object
+  const data = JSON.parse(str(row['data_json'])) as Record<string, unknown>
+
+  let notes = ''
+  try {
+    notes = parseMarkdownFile(str(row['file_path'])).body
+  } catch {
+    // file unreadable — return metadata without notes
+  }
+
+  return { ...data, notes }
+}
+
+/** The only direction values the app understands. Anything else is not an arrow. */
+const DIRECTIONS = ['none', 'outgoing', 'incoming', 'bidirectional'] as const
+
+/**
+ * Reject a direction the app cannot render rather than writing it through.
+ * `direction` is an untyped String in the Rust layer, so a bad value would be
+ * stored happily and then draw as a plain line — the caller would believe it had
+ * set an arrow that does not exist.
+ */
+function parseDirection(raw: unknown): string {
+  if (raw == null) return 'none'
+  const value = String(raw)
+  if (!(DIRECTIONS as readonly string[]).includes(value)) {
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      `Invalid direction "${value}". Expected one of: ${DIRECTIONS.join(', ')}.`,
+    )
+  }
+  return value
+}
+
+/**
+ * How an edge's arrow reads from `nodeId`'s end.
+ *
+ * The stored value is relative to the edge's own source → target, which is set
+ * by whichever end happened to be drawn first and is invisible to the user. The
+ * same arrow therefore reads as 'outgoing' from one end and 'incoming' from the
+ * other, so it has to be flipped when the queried node is the target. Mirrors
+ * src/utils/edgeDirection.ts on the app side.
+ */
+function effectiveDirection(stored: string, sourceId: string, nodeId: string): string {
+  const dir = (DIRECTIONS as readonly string[]).includes(stored) ? stored : 'none'
+  if (sourceId === nodeId) return dir
+  if (dir === 'outgoing') return 'incoming'
+  if (dir === 'incoming') return 'outgoing'
+  return dir
+}
+
+/** Filter on what the arrow does, not on which end is stored first. */
+function matchesDirectionFilter(effective: string, filter: string): boolean {
+  switch (filter) {
+    // A bidirectional arrow genuinely points both ways, so it matches both.
+    case 'outgoing':   return effective === 'outgoing' || effective === 'bidirectional'
+    case 'incoming':   return effective === 'incoming' || effective === 'bidirectional'
+    case 'undirected': return effective === 'none'
+    default:           return true
+  }
 }
 
 function toolGetConnections(
@@ -557,38 +641,48 @@ function toolGetConnections(
   args: Record<string, unknown>,
 ): unknown {
   const id = String(args.id ?? '')
-  const dir = String(args.direction ?? 'all')
+  const filter = String(args.direction ?? 'all')
 
   const exists = db.prepare('SELECT 1 FROM entities WHERE id = ?').get(id)
   if (!exists) throw new McpError(ErrorCode.InvalidParams, `Node not found: ${id}`)
 
-  const base = `
+  // Always fetch both ends. Which end is stored as source is an artefact of how
+  // the connector was drawn, so it must not decide what the caller sees.
+  const rows = db.prepare(`
     SELECT r.edge_id, r.source_id, r.target_id, r.rel_type, r.direction,
            r.label, r.properties_json,
            se.name AS source_name, se.entity_type AS source_type,
            te.name AS target_name, te.entity_type AS target_type
     FROM relationships r
     JOIN entities se ON se.id = r.source_id
-    JOIN entities te ON te.id = r.target_id`
+    JOIN entities te ON te.id = r.target_id
+    WHERE r.source_id = ? OR r.target_id = ?`).all(id, id) as Row[]
 
-  let rows: Row[]
-  if (dir === 'outgoing') {
-    rows = db.prepare(`${base} WHERE r.source_id = ?`).all(id) as Row[]
-  } else if (dir === 'incoming') {
-    rows = db.prepare(`${base} WHERE r.target_id = ?`).all(id) as Row[]
-  } else {
-    rows = db.prepare(`${base} WHERE r.source_id = ? OR r.target_id = ?`).all(id, id) as Row[]
-  }
+  return rows
+    .map(r => {
+      const sourceId = str(r['source_id'])
+      const isSource = sourceId === id
+      const self  = isSource
+        ? { id: sourceId,             name: str(r['source_name']), type: str(r['source_type']) }
+        : { id: str(r['target_id']),  name: str(r['target_name']), type: str(r['target_type']) }
+      const other = isSource
+        ? { id: str(r['target_id']),  name: str(r['target_name']), type: str(r['target_type']) }
+        : { id: sourceId,             name: str(r['source_name']), type: str(r['source_type']) }
 
-  return rows.map(r => ({
-    edge_id:   str(r['edge_id']),
-    source:    { id: str(r['source_id']), name: str(r['source_name']), type: str(r['source_type']) },
-    target:    { id: str(r['target_id']), name: str(r['target_name']), type: str(r['target_type']) },
-    rel_type:  str(r['rel_type']),
-    direction: str(r['direction']),
-    label:     r['label'] != null ? str(r['label']) : null,
-    properties: JSON.parse(str(r['properties_json']) || '{}') as Record<string, string>,
-  }))
+      return {
+        edge_id:    str(r['edge_id']),
+        rel_type:   str(r['rel_type']),
+        node:       self,
+        other:      other,
+        direction:  effectiveDirection(str(r['direction']), sourceId, id),
+        label:      r['label'] != null ? str(r['label']) : null,
+        properties: JSON.parse(str(r['properties_json']) || '{}') as Record<string, string>,
+        // Which node's .md file physically holds this relationship. Needed only
+        // when editing the file directly; it says nothing about the arrow.
+        stored_on:  sourceId,
+      }
+    })
+    .filter(c => matchesDirectionFilter(c.direction, filter))
 }
 
 function toolGetSubgraph(
@@ -951,7 +1045,7 @@ function toolCreateEdge(
   const newRel: RelationshipRecord = {
     target:    targetId,
     rel_type:  relType,
-    direction: String(args.direction ?? 'none'),
+    direction: parseDirection(args.direction),
     properties: (args.properties as Record<string, string>) ?? {},
   }
   if (args.label    != null) newRel.label    = String(args.label)
@@ -1026,9 +1120,10 @@ function toolDeleteEdge(
 export function createServer(
   getDb: () => Database.Database,
   getVaultPath: () => string,
+  getSchemaHint: () => string | null,
 ): Server {
   const server = new Server(
-    { name: 'filamental', version: '0.2.1' },
+    { name: 'filamental', version: '0.2.2' },
     { capabilities: { tools: {} } },
   )
 
@@ -1066,7 +1161,13 @@ export function createServer(
       }
     } catch (err) {
       if (err instanceof McpError) throw err
-      throw new McpError(ErrorCode.InternalError, String(err))
+      // Append version hint only if there is one — keeps the message clean when versions match
+      const hint = getSchemaHint()
+      const base = String(err)
+      throw new McpError(
+        ErrorCode.InternalError,
+        hint ? `${base}\n\n${hint}` : base,
+      )
     }
   })
 
