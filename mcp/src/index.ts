@@ -4,11 +4,11 @@
 // open DB, connect transport. Re-connects automatically when vault changes.
 
 import { existsSync, readFileSync, watchFile } from 'fs'
-import { homedir } from 'os'
 import { join, resolve } from 'path'
 import Database from 'better-sqlite3'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { createServer } from './server.js'
+import { appConfigDir } from './paths.js'
 
 // ── CLI argument parser ───────────────────────────────────────────────────────
 
@@ -21,21 +21,6 @@ function parseArgs(argv: string[]): Record<string, string> {
     }
   }
   return result
-}
-
-// ── App config dir (mirrors Tauri's app_config_dir for "com.filamental.app") ──
-
-function appConfigDir(): string {
-  if (process.platform === 'win32') {
-    return join(process.env['APPDATA'] ?? homedir(), 'com.filamental.app')
-  } else if (process.platform === 'darwin') {
-    return join(homedir(), 'Library', 'Application Support', 'com.filamental.app')
-  } else {
-    return join(
-      process.env['XDG_CONFIG_HOME'] ?? join(homedir(), '.config'),
-      'com.filamental.app',
-    )
-  }
 }
 
 // ── Read the active vault path written by Filamental on every vault open ──────

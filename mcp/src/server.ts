@@ -4,6 +4,10 @@
 import { randomUUID } from 'crypto'
 import { readFileSync, statSync, writeFileSync, mkdirSync, existsSync, unlinkSync } from 'fs'
 import { join, dirname, resolve, sep } from 'path'
+import { helpWorldDir } from './paths.js'
+// Compiled from ai-briefing/*.md. Sent in the initialize response so the client
+// hands it to the model at connect time and no user has to install a skill file.
+import { INSTRUCTIONS } from './briefing.generated.js'
 import Database from 'better-sqlite3'
 import * as yaml from 'js-yaml'
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
@@ -283,14 +287,26 @@ const TOOLS = [
     name: 'search_nodes',
     description:
       'Full-text search across entity names, note bodies and property values. ' +
-      'Returns matching nodes with a contextual snippet.',
+      'Returns matching nodes with a contextual snippet. ' +
+      'An optional `filter` narrows results by field value, and may be used on ' +
+      'its own to list nodes structurally without any search terms.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        query: { type: 'string', description: 'Search terms' },
+        query: { type: 'string', description: 'Search terms. Optional when `filter` is given.' },
         limit: { type: 'number', description: 'Max results (default 20, max 100)' },
+        filter: {
+          type: 'object',
+          description:
+            'Field filter, Mongo-shaped. Fields: name, type, status, category, ' +
+            'display_name, created, modified, version, or any entity property by ' +
+            'bare name (or "properties.<key>" to disambiguate). ' +
+            'Field operators: $eq $ne $gt $gte $lt $lte $in $nin $exists $regex. ' +
+            'Top level: $and $or $not. A bare value means $eq. ' +
+            'Numeric-looking values compare numerically. ' +
+            'Example: {"type":"Person","status":{"$ne":"archived"},"role":{"$in":["dev","lead"]}}',
+        },
       },
-      required: ['query'],
     },
   },
   {
@@ -343,6 +359,45 @@ const TOOLS = [
       properties: {
         id: { type: 'string', description: 'Root entity UUID' },
         depth: { type: 'number', description: 'Hop depth (default 1, max 3)' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'get_context',
+    description:
+      'Assemble one readable markdown document for a node and its neighbourhood: ' +
+      'the node\'s notes plus the notes of every node within `depth` hops, inlined ' +
+      'with headings that track hop distance and the connector each was reached by. ' +
+      'Use this instead of get_subgraph + repeated get_node when you want to READ ' +
+      'the surrounding content rather than inspect graph shape. ' +
+      'Set dry_run to size the result before pulling it.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Root entity UUID' },
+        depth: {
+          type: 'number',
+          description: 'Hop depth (default 1, max 3). 0 returns the root node alone.',
+        },
+        direction: {
+          type: 'string',
+          enum: ['any', 'outgoing', 'incoming'],
+          description:
+            'Which connectors to follow, resolved from the current node\'s end. ' +
+            'Default "any" follows every connector and works on undirected graphs. ' +
+            'Use "outgoing" to walk a directed hierarchy downward, "incoming" for parent context.',
+        },
+        dry_run: {
+          type: 'boolean',
+          description:
+            'When true, return node/edge counts and estimated size only, no markdown. ' +
+            'Use to check the cost before pulling a large neighbourhood.',
+        },
+        max_chars: {
+          type: 'number',
+          description: 'Truncation cap for the assembled markdown (default 50000, max 200000)',
+        },
       },
       required: ['id'],
     },
@@ -515,44 +570,323 @@ const TOOLS = [
       required: ['source_id', 'target_id', 'rel_type'],
     },
   },
+  {
+    name: 'read_skill_guide',
+    description:
+      'Read the full Filamental skill guide: how to design a space, choose entity ' +
+      'and connector vocabularies, set colours, arrow directions and physics weights, ' +
+      'and the conventions that make a structure readable. The server instructions ' +
+      'already carry the essentials, so reach for this when you need depth: building ' +
+      'a substantial structure from scratch, or a question the essentials do not settle.',
+    inputSchema: { type: 'object' as const, properties: {} },
+  },
+  {
+    name: 'read_format_reference',
+    description:
+      'Read the exact on-disk file format: the YAML frontmatter fields of a node ' +
+      'markdown file, how relationships are stored, and what the .filamental folder ' +
+      'holds. Needed only when reading or writing vault files directly rather than ' +
+      'through these tools.',
+    inputSchema: { type: 'object' as const, properties: {} },
+  },
+  {
+    name: 'extract_section',
+    description:
+      'Move a heading\'s section out of a node into a new node of its own. ' +
+      'The heading stays behind with a [[wikilink]] where the content was, and a ' +
+      'connector is created from the source to the new node. A section runs to the ' +
+      'next heading of the same or higher level, so extracting an h2 takes its h3 ' +
+      'children with it. Content is MOVED, not copied: exactly one copy survives. ' +
+      'Use dry_run first to see what would move.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id:      { type: 'string', description: 'UUID of the node to extract from' },
+        heading: {
+          type: 'string',
+          description: 'Heading text to extract, with or without leading #s. Case-insensitive.',
+        },
+        name: {
+          type: 'string',
+          description: 'Name for the new node (default: the heading text)',
+        },
+        entity_type: { type: 'string', description: 'Entity type for the new node' },
+        folder:      { type: 'string', description: 'Vault-relative folder for the new file' },
+        rel_type:    { type: 'string', description: 'Connector type (default "includes")' },
+        direction: {
+          type: 'string',
+          enum: ['none', 'outgoing', 'incoming', 'bidirectional'],
+          description: 'Connector direction from source to new node (default "outgoing")',
+        },
+        dry_run: {
+          type: 'boolean',
+          description: 'Preview the move without writing anything',
+        },
+      },
+      required: ['id', 'heading'],
+    },
+  },
+  {
+    name: 'inline_section',
+    description:
+      'Fold a node\'s content back into another node: the inverse of extract_section. ' +
+      'The content lands where the [[wikilink]] to it already sits, or is appended ' +
+      'if there is no such link, and the connector between the two is removed. ' +
+      'The target node is DELETED by default, because keeping it would leave the same ' +
+      'text in two files. Deletion is refused if the target is connected to anything ' +
+      'other than the source. Pass delete_target: false to keep the node as an empty ' +
+      'stub instead. Use dry_run first.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        source_id: { type: 'string', description: 'UUID of the node to inline INTO' },
+        target_id: { type: 'string', description: 'UUID of the node whose content moves' },
+        level: {
+          type: 'number',
+          description: 'Heading level for the inlined section, 1-6 (default 2)',
+        },
+        delete_target: {
+          type: 'boolean',
+          description:
+            'Delete the target node once its content has moved (default true). ' +
+            'False leaves it in place with an empty body.',
+        },
+        dry_run: {
+          type: 'boolean',
+          description: 'Preview the merge without writing anything',
+        },
+      },
+      required: ['source_id', 'target_id'],
+    },
+  },
 ]
+
+// ── Property filter evaluation ────────────────────────────────────────────────
+
+/**
+ * Resolve a filter field name against a node record.
+ *
+ * Bare names that are not one of the known top-level columns resolve to entries
+ * in `properties`, so `{ role: 'lead' }` reads the way a user expects without
+ * requiring the `properties.` prefix. The explicit prefix is still honoured so a
+ * property that shares a name with a column (a `status` property, say) stays
+ * reachable.
+ */
+function resolveField(node: Record<string, unknown>, field: string): unknown {
+  if (field.startsWith('properties.')) {
+    const props = (node['properties'] ?? {}) as Record<string, unknown>
+    return props[field.slice('properties.'.length)]
+  }
+
+  switch (field) {
+    case 'name':
+    case 'status':
+    case 'category':
+    case 'display_name':
+    case 'created':
+    case 'modified':
+    case 'version':
+      return node[field]
+    case 'type':
+    case 'entity_type':
+      // data_json stores this as "type" — the Rust NodeData renames it via
+      // #[serde(rename = "type")] (see upsertEntity). Accept the TS-side spelling
+      // too so a record built from NodeRecord rather than the DB also filters.
+      return node['type'] ?? node['entity_type']
+    default: {
+      const props = (node['properties'] ?? {}) as Record<string, unknown>
+      return props[field]
+    }
+  }
+}
+
+/**
+ * Order two values.
+ *
+ * Properties are stored as strings, so a numeric comparison on them would
+ * otherwise be lexicographic — '10' < '9' — which is wrong for every numeric
+ * property a vault is likely to hold. Compare numerically whenever both sides
+ * parse as finite numbers, and fall back to string order otherwise. ISO dates
+ * sort correctly as strings, so they need no special case.
+ */
+function compareValues(a: unknown, b: unknown): number {
+  const na = typeof a === 'number' ? a : Number(str(a))
+  const nb = typeof b === 'number' ? b : Number(str(b))
+  if (Number.isFinite(na) && Number.isFinite(nb) && str(a) !== '' && str(b) !== '') {
+    return na === nb ? 0 : na < nb ? -1 : 1
+  }
+  const sa = str(a)
+  const sb = str(b)
+  return sa === sb ? 0 : sa < sb ? -1 : 1
+}
+
+function looseEquals(actual: unknown, expected: unknown): boolean {
+  if (actual == null) return expected == null
+  return compareValues(actual, expected) === 0
+}
+
+/** Apply one operator object, e.g. `{ $gte: 3, $lt: 10 }`, to a single field. */
+function evaluateOperators(actual: unknown, ops: Record<string, unknown>): boolean {
+  for (const [op, expected] of Object.entries(ops)) {
+    switch (op) {
+      case '$eq':  if (!looseEquals(actual, expected)) return false; break
+      case '$ne':  if (looseEquals(actual, expected)) return false; break
+      case '$gt':  if (actual == null || compareValues(actual, expected) <= 0) return false; break
+      case '$gte': if (actual == null || compareValues(actual, expected) <  0) return false; break
+      case '$lt':  if (actual == null || compareValues(actual, expected) >= 0) return false; break
+      case '$lte': if (actual == null || compareValues(actual, expected) >  0) return false; break
+
+      case '$in':
+      case '$nin': {
+        if (!Array.isArray(expected)) {
+          throw new McpError(ErrorCode.InvalidParams, `${op} expects an array`)
+        }
+        const hit = expected.some(e => looseEquals(actual, e))
+        if (op === '$in' ? !hit : hit) return false
+        break
+      }
+
+      case '$exists': {
+        const present = actual != null && str(actual) !== ''
+        if (present !== Boolean(expected)) return false
+        break
+      }
+
+      case '$regex': {
+        let re: RegExp
+        try {
+          re = new RegExp(str(expected), 'i')
+        } catch {
+          throw new McpError(ErrorCode.InvalidParams, `Invalid $regex: ${str(expected)}`)
+        }
+        if (actual == null || !re.test(str(actual))) return false
+        break
+      }
+
+      default:
+        throw new McpError(ErrorCode.InvalidParams, `Unknown filter operator: ${op}`)
+    }
+  }
+  return true
+}
+
+function isOperatorObject(v: unknown): v is Record<string, unknown> {
+  return (
+    typeof v === 'object' &&
+    v !== null &&
+    !Array.isArray(v) &&
+    Object.keys(v).some(k => k.startsWith('$'))
+  )
+}
+
+/**
+ * Evaluate a Mongo-shaped filter against a node record.
+ *
+ * Supported at field level: $eq $ne $gt $gte $lt $lte $in $nin $exists $regex.
+ * Supported at top level: $and $or $not. A bare value is shorthand for $eq.
+ */
+export function evaluateFilter(node: Record<string, unknown>, filter: unknown): boolean {
+  if (filter == null) return true
+  if (typeof filter !== 'object' || Array.isArray(filter)) {
+    throw new McpError(ErrorCode.InvalidParams, 'filter must be an object')
+  }
+
+  for (const [key, condition] of Object.entries(filter as Record<string, unknown>)) {
+    if (key === '$and' || key === '$or') {
+      if (!Array.isArray(condition)) {
+        throw new McpError(ErrorCode.InvalidParams, `${key} expects an array of filters`)
+      }
+      const results = condition.map(c => evaluateFilter(node, c))
+      if (key === '$and' ? !results.every(Boolean) : !results.some(Boolean)) return false
+      continue
+    }
+
+    if (key === '$not') {
+      if (evaluateFilter(node, condition)) return false
+      continue
+    }
+
+    if (key.startsWith('$')) {
+      throw new McpError(ErrorCode.InvalidParams, `Unknown top-level filter operator: ${key}`)
+    }
+
+    const actual = resolveField(node, key)
+    const ok = isOperatorObject(condition)
+      ? evaluateOperators(actual, condition)
+      : looseEquals(actual, condition)
+    if (!ok) return false
+  }
+
+  return true
+}
 
 // ── Read tool implementations ─────────────────────────────────────────────────
 
-function toolSearchNodes(
+export function toolSearchNodes(
   db: Database.Database,
   args: Record<string, unknown>,
 ): unknown {
   const query = String(args.query ?? '').trim()
   const limit = typeof args.limit === 'number' ? Math.min(Math.max(1, args.limit), 100) : 20
+  const filter = args.filter ?? null
 
-  if (!query) return []
+  // Unchanged from before `filter` existed: no query and no filter is not a
+  // request to return the whole vault.
+  if (!query && filter == null) return []
 
-  const ftsQuery = buildFtsQuery(query)
+  // With a filter the LIMIT can no longer be pushed into SQL — rows are dropped
+  // after the query runs, so limiting first would silently under-return. Pull a
+  // wider candidate set, filter, then trim.
+  const candidateLimit = filter == null ? limit : Math.min(Math.max(limit * 20, 200), 2000)
 
-  const rows = db
-    .prepare(
-      `SELECT
-         f.entity_id AS id,
-         e.name,
-         e.entity_type AS type,
-         e.status,
-         CASE
-           WHEN instr(lower(e.name),            lower(@query)) > 0 THEN 'name'
-           WHEN instr(lower(f.properties_text), lower(@query)) > 0 THEN 'property'
-           ELSE 'body'
-         END AS match_field,
-         snippet(entities_fts, 2, '[', ']', '...', 15) AS snippet,
-         rank
-       FROM entities_fts f
-       JOIN entities e ON e.id = f.entity_id
-       WHERE entities_fts MATCH @fts_query
-       ORDER BY rank
-       LIMIT @limit`,
-    )
-    .all({ query, fts_query: ftsQuery, limit }) as Row[]
+  let rows: Row[]
 
-  return rows.map(r => ({
+  if (query) {
+    const ftsQuery = buildFtsQuery(query)
+    rows = db
+      .prepare(
+        `SELECT
+           f.entity_id AS id,
+           e.name,
+           e.entity_type AS type,
+           e.status,
+           e.data_json,
+           CASE
+             WHEN instr(lower(e.name),            lower(@query)) > 0 THEN 'name'
+             WHEN instr(lower(f.properties_text), lower(@query)) > 0 THEN 'property'
+             ELSE 'body'
+           END AS match_field,
+           snippet(entities_fts, 2, '[', ']', '...', 15) AS snippet,
+           rank
+         FROM entities_fts f
+         JOIN entities e ON e.id = f.entity_id
+         WHERE entities_fts MATCH @fts_query
+         ORDER BY rank
+         LIMIT @limit`,
+      )
+      .all({ query, fts_query: ftsQuery, limit: candidateLimit }) as Row[]
+  } else {
+    // Filter-only search: no text to rank by, so order by name for a stable result.
+    rows = db
+      .prepare(
+        `SELECT id, name, entity_type AS type, status, data_json,
+                'filter' AS match_field, '' AS snippet
+         FROM entities
+         ORDER BY name
+         LIMIT @limit`,
+      )
+      .all({ limit: candidateLimit }) as Row[]
+  }
+
+  const matched =
+    filter == null
+      ? rows
+      : rows.filter(r => {
+          const data = JSON.parse(str(r['data_json']) || '{}') as Record<string, unknown>
+          return evaluateFilter(data, filter)
+        })
+
+  return matched.slice(0, limit).map(r => ({
     id:          str(r['id']),
     name:        str(r['name']),
     type:        str(r['type']),
@@ -753,6 +1087,215 @@ function toolGetSubgraph(
   }))
 
   return { nodes, edges }
+}
+
+/** One node as it appears in an assembled context document. */
+interface ContextEntry {
+  id: string
+  name: string
+  type: string
+  hop: number
+  /** How this node was reached. Null for the root. */
+  via: { from: string; rel_type: string; label: string | null; direction: string } | null
+  body: string
+}
+
+/**
+ * Assemble a readable markdown document for a node and everything around it.
+ *
+ * `get_subgraph` answers "what is the shape here" and returns nodes and edges;
+ * answering "what does this say" from that costs one `get_node` call per node.
+ * This walks the same BFS but inlines the note bodies, so a caller gets the
+ * whole readable neighbourhood in one round trip.
+ */
+export function toolGetContext(
+  db: Database.Database,
+  args: Record<string, unknown>,
+): unknown {
+  const rootId = String(args.id ?? '')
+
+  const rootRow = db
+    .prepare('SELECT data_json FROM entities WHERE id = ?')
+    .get(rootId) as Row | undefined
+  if (!rootRow) throw new McpError(ErrorCode.InvalidParams, `Node not found: ${rootId}`)
+
+  const depth = Math.min(
+    typeof args.depth === 'number' ? Math.max(0, Math.floor(args.depth)) : 1,
+    3,
+  )
+  const dryRun = args.dry_run === true
+  const maxChars = Math.min(
+    typeof args.max_chars === 'number' ? Math.max(1000, Math.floor(args.max_chars)) : 50000,
+    200000,
+  )
+
+  const directionArg = String(args.direction ?? 'any')
+  if (!['any', 'outgoing', 'incoming'].includes(directionArg)) {
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      `Invalid direction "${directionArg}". Expected one of: any, outgoing, incoming.`,
+    )
+  }
+  // `matchesDirectionFilter` treats anything it does not recognise as "match
+  // everything", which is exactly what 'any' should do.
+  const dirFilter = directionArg === 'any' ? 'all' : directionArg
+
+  const relStmt = db.prepare(
+    `SELECT edge_id, source_id, target_id, rel_type, direction, label
+     FROM relationships
+     WHERE source_id = ? OR target_id = ?`,
+  )
+  const nodeStmt = db.prepare('SELECT file_path, data_json FROM entities WHERE id = ?')
+
+  /** Read a node's metadata and note body. Missing files degrade to empty text. */
+  function loadEntry(
+    id: string,
+    hop: number,
+    via: ContextEntry['via'],
+  ): ContextEntry | null {
+    const row = nodeStmt.get(id) as Row | undefined
+    if (!row) return null
+    const data = JSON.parse(str(row['data_json']) || '{}') as Record<string, unknown>
+    let body = ''
+    try {
+      body = parseMarkdownFile(str(row['file_path'])).body.trim()
+    } catch {
+      // Unreadable or unparseable file — keep the node, drop the text.
+    }
+    return {
+      id,
+      name: str(data['name']),
+      // "type" is the key in data_json; see the serde note in upsertEntity.
+      type: str(data['type'] ?? data['entity_type']),
+      hop,
+      via,
+      body,
+    }
+  }
+
+  const rootEntry = loadEntry(rootId, 0, null)
+  if (!rootEntry) throw new McpError(ErrorCode.InvalidParams, `Node not found: ${rootId}`)
+
+  const entries: ContextEntry[] = [rootEntry]
+  const visitedNodes = new Set<string>([rootId])
+  const visitedEdges = new Set<string>()
+  let edgeCount = 0
+
+  let frontier: Array<{ id: string; name: string }> = [{ id: rootId, name: rootEntry.name }]
+
+  for (let d = 0; d < depth; d++) {
+    if (frontier.length === 0) break
+    const nextFrontier: Array<{ id: string; name: string }> = []
+
+    for (const current of frontier) {
+      const rows = relStmt.all(current.id, current.id) as Row[]
+
+      for (const row of rows) {
+        const edgeId = str(row['edge_id'])
+        const srcId = str(row['source_id'])
+
+        // Resolve the arrow from this node's end before filtering. Which end is
+        // stored as source is an artefact of drawing order, so filtering on
+        // source_id here would drop half the graph.
+        const effective = effectiveDirection(str(row['direction']), srcId, current.id)
+        if (!matchesDirectionFilter(effective, dirFilter)) continue
+
+        if (!visitedEdges.has(edgeId)) {
+          visitedEdges.add(edgeId)
+          edgeCount++
+        }
+
+        const otherId = srcId === current.id ? str(row['target_id']) : srcId
+        if (visitedNodes.has(otherId)) continue
+        visitedNodes.add(otherId)
+
+        const entry = loadEntry(otherId, d + 1, {
+          from: current.name,
+          rel_type: str(row['rel_type']),
+          label: row['label'] != null ? str(row['label']) : null,
+          direction: effective,
+        })
+        if (!entry) continue
+
+        entries.push(entry)
+        nextFrontier.push({ id: otherId, name: entry.name })
+      }
+    }
+
+    frontier = nextFrontier
+  }
+
+  // Render. Heading level tracks hop distance so the hierarchy is visible.
+  const sections = entries.map(e => {
+    const hashes = '#'.repeat(Math.min(e.hop + 1, 6))
+    const relation = e.via
+      ? ` — ${e.via.rel_type}${e.via.label ? ` (${e.via.label})` : ''} from ${e.via.from}`
+      : ''
+    const header = `${hashes} ${e.name} [${e.type}]${relation}`
+    return e.body ? `${header}\n\n${e.body}` : `${header}\n\n_(no notes)_`
+  })
+
+  const full = sections.join('\n\n')
+  const truncated = full.length > maxChars
+
+  if (dryRun) {
+    return {
+      root: { id: rootEntry.id, name: rootEntry.name, type: rootEntry.type },
+      node_count: entries.length,
+      edge_count: edgeCount,
+      estimated_chars: full.length,
+      would_truncate: truncated,
+      max_chars: maxChars,
+    }
+  }
+
+  return {
+    root: { id: rootEntry.id, name: rootEntry.name, type: rootEntry.type },
+    node_count: entries.length,
+    edge_count: edgeCount,
+    char_count: Math.min(full.length, maxChars),
+    truncated,
+    markdown: truncated ? `${full.slice(0, maxChars)}\n\n_[truncated at max_chars]_` : full,
+  }
+}
+
+/**
+ * Drop a leading YAML frontmatter block.
+ *
+ * The reference documents are themselves nodes in the help vault, so they carry
+ * the usual frontmatter: ids, timestamps, relationships. That is vault
+ * bookkeeping, and sending it to a model is pure noise ahead of the prose.
+ * A document with no frontmatter, or an unterminated block, is returned intact.
+ */
+export function stripFrontmatter(raw: string): string {
+  if (!raw.startsWith('---\n')) return raw.trim()
+  const close = raw.indexOf('\n---\n', 4)
+  if (close === -1) return raw.trim()
+  return raw.slice(close + 5).trim()
+}
+
+/**
+ * Serve one of the reference documents the desktop app installs.
+ *
+ * These are the same files the app offers as downloads and the same ones the
+ * in-app assistant reads, so an MCP client gets identical depth without the user
+ * having to install anything. The directory belongs to the app rather than this
+ * package, so absence is an expected state, not a failure.
+ */
+export function readReferenceDoc(filename: string, label: string): unknown {
+  const path = join(helpWorldDir(), filename)
+  try {
+    return { filename, content: stripFrontmatter(readFileSync(path, 'utf-8')) }
+  } catch {
+    return {
+      filename,
+      content: null,
+      error:
+        `The ${label} is not available. It ships with the Filamental desktop app ` +
+        `and is expected at ${path}. Continue using the tool descriptions and the ` +
+        `server instructions, which cover the essentials.`,
+    }
+  }
 }
 
 function toolListNodeTypes(vaultPath: string): unknown {
@@ -1115,6 +1658,329 @@ function toolDeleteEdge(
   return { deleted: true, edge_id: edgeId }
 }
 
+// ── Markdown section surgery ──────────────────────────────────────────────────
+
+/**
+ * Which lines of a body are inside a fenced code block.
+ *
+ * Headings are found by line prefix, and a '# comment' inside a shell or Python
+ * fence looks exactly like an h1. Without this, extracting a section from a note
+ * containing code would cut the document at the wrong place.
+ */
+function fencedLines(lines: string[]): boolean[] {
+  const inFence: boolean[] = new Array(lines.length).fill(false)
+  let fence: string | null = null
+
+  lines.forEach((line, i) => {
+    const m = /^\s{0,3}(`{3,}|~{3,})/.exec(line)
+    if (fence == null && m) {
+      fence = m[1]![0]!
+      inFence[i] = true
+      return
+    }
+    if (fence != null) {
+      inFence[i] = true
+      // A closing fence is the same character, at least as long, nothing after it.
+      if (m && m[1]![0] === fence && /^\s{0,3}(`{3,}|~{3,})\s*$/.test(line)) fence = null
+    }
+  })
+
+  return inFence
+}
+
+interface FoundSection {
+  level: number
+  title: string
+  /** Line index of the heading itself. */
+  start: number
+  /** Exclusive line index where the section ends. */
+  end: number
+  /** Section text with the heading line removed. */
+  content: string
+}
+
+/** Normalise a heading for matching: strip #s, trim, casefold. */
+function normaliseHeading(raw: string): string {
+  return raw.replace(/^\s*#+\s*/, '').trim().toLowerCase()
+}
+
+/**
+ * Locate a heading and the extent of its section.
+ *
+ * A section runs from its heading to the next heading of the same or higher
+ * level, so extracting an h2 takes its h3 children with it.
+ */
+function findSection(body: string, heading: string): FoundSection | null {
+  const lines = body.split('\n')
+  const fenced = fencedLines(lines)
+  const wanted = normaliseHeading(heading)
+
+  let start = -1
+  let level = 0
+
+  for (let i = 0; i < lines.length; i++) {
+    if (fenced[i]) continue
+    const m = /^(#{1,6})\s+(.*)$/.exec(lines[i]!)
+    if (!m) continue
+    if (normaliseHeading(m[2]!) === wanted) {
+      start = i
+      level = m[1]!.length
+      break
+    }
+  }
+
+  if (start === -1) return null
+
+  let end = lines.length
+  for (let i = start + 1; i < lines.length; i++) {
+    if (fenced[i]) continue
+    const m = /^(#{1,6})\s+/.exec(lines[i]!)
+    if (m && m[1]!.length <= level) {
+      end = i
+      break
+    }
+  }
+
+  return {
+    level,
+    title: /^#{1,6}\s+(.*)$/.exec(lines[start]!)![1]!.trim(),
+    start,
+    end,
+    content: lines.slice(start + 1, end).join('\n').trim(),
+  }
+}
+
+/** Splice a replacement block in place of lines [start, end). */
+function replaceLines(body: string, start: number, end: number, replacement: string[]): string {
+  const lines = body.split('\n')
+  lines.splice(start, end - start, ...replacement)
+  return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim()
+}
+
+/** Persist a node's frontmatter and body, and refresh its index row. */
+function writeNode(
+  db: Database.Database,
+  filePath: string,
+  node: NodeRecord,
+  body: string,
+): void {
+  node.modified = new Date().toISOString()
+  node.modified_by = 'filamental-mcp'
+  node.version += 1
+  node.has_notes = body.trim().length > 0
+  writeFileSync(filePath, serialiseMarkdown(node, body), 'utf-8')
+  upsertEntity(db, node, filePath, body)
+}
+
+/** Load a node from its file, falling back to the index row if the file is bad. */
+function loadNodeForEdit(
+  db: Database.Database,
+  id: string,
+  what: string,
+): { node: NodeRecord; body: string; filePath: string } {
+  const row = db
+    .prepare('SELECT file_path, data_json FROM entities WHERE id = ?')
+    .get(id) as Row | undefined
+  if (!row) throw new McpError(ErrorCode.InvalidParams, `${what} not found: ${id}`)
+
+  const filePath = str(row['file_path'])
+  try {
+    const parsed = parseMarkdownFile(filePath)
+    return { node: parsed.node, body: parsed.body, filePath }
+  } catch {
+    return {
+      node: JSON.parse(str(row['data_json'])) as NodeRecord,
+      body: '',
+      filePath,
+    }
+  }
+}
+
+/**
+ * Move a heading's section out of a node into a new node of its own, leaving a
+ * wikilink behind and creating a connector between the two.
+ *
+ * Content is moved, never copied: the section is removed from the source in the
+ * same operation that writes it to the new node, so there is still exactly one
+ * copy of it in the vault.
+ */
+export function toolExtractSection(
+  db: Database.Database,
+  vaultPath: string,
+  args: Record<string, unknown>,
+): unknown {
+  const id = String(args.id ?? '').trim()
+  const heading = String(args.heading ?? '').trim()
+  if (!id) throw new McpError(ErrorCode.InvalidParams, 'id is required')
+  if (!heading) throw new McpError(ErrorCode.InvalidParams, 'heading is required')
+
+  const { node, body, filePath } = loadNodeForEdit(db, id, 'Node')
+
+  const section = findSection(body, heading)
+  if (!section) {
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      `Heading not found in node ${id}: "${heading}"`,
+    )
+  }
+  if (!section.content) {
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      `Section "${section.title}" is empty; nothing to extract.`,
+    )
+  }
+
+  const newName = typeof args.name === 'string' && args.name.trim()
+    ? args.name.trim()
+    : section.title
+  const relType = String(args.rel_type ?? 'includes').trim() || 'includes'
+  const direction = parseDirection(args.direction ?? 'outgoing')
+
+  if (args.dry_run === true) {
+    return {
+      would_create: { name: newName, entity_type: args.entity_type ?? 'unclassified' },
+      section: { title: section.title, level: section.level, chars: section.content.length },
+      source: { id, name: node.name, file_path: filePath },
+      rel_type: relType,
+      direction,
+      preview: section.content.slice(0, 500),
+    }
+  }
+
+  const created = toolCreateNode(db, vaultPath, {
+    name: newName,
+    entity_type: args.entity_type,
+    notes: section.content,
+    folder: args.folder,
+  }) as { id: string; file_path: string }
+
+  // Leave the heading in place so the document still reads, with a wikilink
+  // where the content used to be.
+  const newBody = replaceLines(body, section.start, section.end, [
+    '#'.repeat(section.level) + ' ' + section.title,
+    '',
+    `[[${newName}]]`,
+    '',
+  ])
+
+  node.relationships.push({
+    target: created.id,
+    rel_type: relType,
+    direction,
+    properties: {},
+  })
+
+  writeNode(db, filePath, node, newBody)
+
+  return {
+    extracted_node: { id: created.id, name: newName, file_path: created.file_path },
+    source: { id, name: node.name, file_path: filePath },
+    edge: { source_id: id, target_id: created.id, rel_type: relType, direction },
+    chars_moved: section.content.length,
+  }
+}
+
+/**
+ * Fold a node's content back into another node: the inverse of extract_section.
+ *
+ * The target is deleted by default, because leaving it would put the same text
+ * in two files and the vault's rule is that a `.md` file is the one copy of its
+ * content. Deletion is refused when the target is connected to anything besides
+ * the source, since that would silently break relationships this operation was
+ * never asked to touch.
+ */
+export function toolInlineSection(
+  db: Database.Database,
+  args: Record<string, unknown>,
+): unknown {
+  const sourceId = String(args.source_id ?? '').trim()
+  const targetId = String(args.target_id ?? '').trim()
+  if (!sourceId) throw new McpError(ErrorCode.InvalidParams, 'source_id is required')
+  if (!targetId) throw new McpError(ErrorCode.InvalidParams, 'target_id is required')
+  if (sourceId === targetId) {
+    throw new McpError(ErrorCode.InvalidParams, 'source_id and target_id must differ')
+  }
+
+  const src = loadNodeForEdit(db, sourceId, 'Source node')
+  const tgt = loadNodeForEdit(db, targetId, 'Target node')
+
+  const deleteTarget = args.delete_target !== false
+
+  // Connections the target has to anything other than the source.
+  const foreignEdges = (
+    db.prepare(
+      `SELECT edge_id, source_id, target_id FROM relationships
+       WHERE (source_id = @t OR target_id = @t)
+         AND NOT (source_id = @s AND target_id = @t)
+         AND NOT (source_id = @t AND target_id = @s)`,
+    ).all({ t: targetId, s: sourceId }) as Row[]
+  ).map(r => str(r['edge_id']))
+
+  if (deleteTarget && foreignEdges.length > 0) {
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      `Refusing to delete "${tgt.node.name}": it is still connected to ` +
+        `${foreignEdges.length} other node(s). Inline it with delete_target: false ` +
+        `to keep the node, or remove those connectors first.`,
+    )
+  }
+
+  const level = typeof args.level === 'number' ? Math.min(Math.max(1, args.level), 6) : 2
+  const sectionLines = [
+    '#'.repeat(level) + ' ' + tgt.node.name,
+    '',
+    tgt.body.trim(),
+    '',
+  ]
+
+  // Prefer to land the content where the wikilink already points, so the
+  // document keeps its shape. Fall back to appending.
+  const lines = src.body.split('\n')
+  const linkIdx = lines.findIndex(
+    l => l.trim() === `[[${tgt.node.name}]]`,
+  )
+
+  const newBody =
+    linkIdx === -1
+      ? `${src.body.trim()}\n\n${sectionLines.join('\n')}`.replace(/\n{3,}/g, '\n\n').trim()
+      : replaceLines(src.body, linkIdx, linkIdx + 1, sectionLines)
+
+  if (args.dry_run === true) {
+    return {
+      would_inline: { id: targetId, name: tgt.node.name, chars: tgt.body.trim().length },
+      into: { id: sourceId, name: src.node.name },
+      placement: linkIdx === -1 ? 'appended' : 'replaced wikilink in place',
+      delete_target: deleteTarget,
+      foreign_edges: foreignEdges.length,
+      preview: newBody.slice(0, 500),
+    }
+  }
+
+  // Drop connectors between the two that live on the source's file.
+  src.node.relationships = src.node.relationships.filter(r => r.target !== targetId)
+
+  writeNode(db, src.filePath, src.node, newBody)
+
+  let deleted = false
+  if (deleteTarget) {
+    toolDeleteNode(db, { id: targetId })
+    deleted = true
+  } else {
+    // Content moved out, so the target must not keep a second copy of it.
+    writeNode(db, tgt.filePath, tgt.node, '')
+  }
+
+  return {
+    inlined: { id: targetId, name: tgt.node.name },
+    into: { id: sourceId, name: src.node.name, file_path: src.filePath },
+    placement: linkIdx === -1 ? 'appended' : 'replaced wikilink in place',
+    target_deleted: deleted,
+    chars_moved: tgt.body.trim().length,
+  }
+}
+
+// ── Connection briefing ───────────────────────────────────────────────────────
+
 // ── Server factory ────────────────────────────────────────────────────────────
 
 export function createServer(
@@ -1123,8 +1989,11 @@ export function createServer(
   getSchemaHint: () => string | null,
 ): Server {
   const server = new Server(
-    { name: 'filamental', version: '0.2.2' },
-    { capabilities: { tools: {} } },
+    { name: 'filamental', version: '0.2.9' },
+    // `instructions` is delivered in the initialize response and surfaced to the
+    // model by the client, so the user does not have to install anything for the
+    // assistant to know how a Filamental space works.
+    { capabilities: { tools: {} }, instructions: INSTRUCTIONS },
   )
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }))
@@ -1144,6 +2013,7 @@ export function createServer(
         case 'get_node':             result = toolGetNode(db, a);                        break
         case 'get_connections':      result = toolGetConnections(db, a);                 break
         case 'get_subgraph':         result = toolGetSubgraph(db, a);                    break
+        case 'get_context':          result = toolGetContext(db, a);                     break
         case 'list_node_types':      result = toolListNodeTypes(vaultPath);              break
         case 'list_connector_types': result = toolListConnectorTypes(vaultPath);         break
         case 'get_vault_info':       result = toolGetVaultInfo(db, vaultPath);           break
@@ -1152,6 +2022,14 @@ export function createServer(
         case 'delete_node':          result = toolDeleteNode(db, a);                     break
         case 'create_edge':          result = toolCreateEdge(db, a);                     break
         case 'delete_edge':          result = toolDeleteEdge(db, a);                     break
+        case 'read_skill_guide':
+          result = readReferenceDoc('filamental_SKILL.md', 'skill guide')
+          break
+        case 'read_format_reference':
+          result = readReferenceDoc('filamental_format_reference.md', 'format reference')
+          break
+        case 'extract_section':      result = toolExtractSection(db, vaultPath, a);      break
+        case 'inline_section':       result = toolInlineSection(db, a);                  break
         default:
           throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`)
       }

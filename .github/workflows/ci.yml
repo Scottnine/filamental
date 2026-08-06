@@ -1,29 +1,40 @@
 name: CI
 
+# This repository is a curated public subset: it carries the MCP server source
+# and the skills, not the desktop app. The previous version of this workflow ran
+# the app's lint/typecheck/test and `cargo test` against src-tauri, none of which
+# exist here, so it failed on `npm ci` every time it ran.
+#
+# Scope it to what is actually present. The MCP server is what the MCP Registry
+# and the Anthropic directory listing point people at, so it is the part worth
+# gating.
+
 on:
   push:
     branches: [main]
+    paths:
+      - 'mcp/**'
+      - '.github/workflows/ci.yml'
+  pull_request:
+    paths:
+      - 'mcp/**'
   workflow_dispatch:
 
 jobs:
-  frontend:
+  mcp:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mcp
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v6
         with:
           node-version: '22'
+          cache: npm
+          cache-dependency-path: mcp/package-lock.json
       - run: npm ci
-      - run: npm run lint
-      - run: npx tsc --noEmit
-      - run: npm test
-
-  rust:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev build-essential libssl-dev libxdo-dev
-      - run: cargo test --manifest-path src-tauri/Cargo.toml
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Test
+        run: npm test

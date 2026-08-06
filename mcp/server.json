@@ -1,18 +1,18 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.Scottnine/filamental",
-  "description": "Read/write access to your Filamental knowledge graph vault. 12 tools. Local-first, no auth.",
+  "description": "Read/write access to your Filamental knowledge graph vault. 17 tools. Local-first, no auth.",
   "repository": {
     "url": "https://github.com/Scottnine/filamental",
     "source": "github",
     "subfolder": "mcp"
   },
-  "version": "0.2.7",
+  "version": "0.2.9",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "filamental-mcp",
-      "version": "0.2.7",
+      "version": "0.2.9",
       "transport": {
         "type": "stdio"
       }

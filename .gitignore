@@ -1,0 +1,8 @@
+node_modules/
+
+# Build output. `dist/` is a staged copy of the ncc bundle, and `bundle/` is the
+# bundle itself — both are generated, and the published npm package carries them.
+dist/
+bundle/
+*.tgz
+*.mcpb

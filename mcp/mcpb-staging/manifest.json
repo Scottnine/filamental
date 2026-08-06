@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "filamental",
   "display_name": "Filamental",
-  "version": "0.2.7",
+  "version": "0.2.9",
   "description": "Connect Claude to your Filamental knowledge graph. Search nodes, follow connections, and read or write vault content directly from Claude Desktop -- no copy-paste required.",
   "long_description": "Filamental is a 3D knowledge graph desktop app. This extension gives Claude live read/write access to your vault -- the same data the app uses -- so you can ask questions, find connections, and build out your graph entirely from conversation.\n\nNo vault path needed. The extension reads whichever world you have open in Filamental and switches automatically when you change worlds.\n\n**What Claude can do:**\n- Search across all node names, notes, and properties\n- Retrieve full node records and follow connections\n- Traverse subgraphs to understand clusters of related content\n- Create, update, and delete nodes\n- Add and remove edges between nodes\n\nChanges made through Claude appear immediately the next time you open the vault in Filamental.\n\n**Requires:** Filamental desktop app installed and at least one vault opened.",
   "author": {
@@ -27,14 +27,18 @@
   "license": "MIT",
   "privacy_policies": [],
   "compatibility": {
-    "platforms": ["win32"]
+    "platforms": [
+      "win32"
+    ]
   },
   "server": {
     "type": "node",
     "entry_point": "bundle/index.js",
     "mcp_config": {
       "command": "node",
-      "args": ["${__dirname}/bundle/index.js"]
+      "args": [
+        "${__dirname}/bundle/index.js"
+      ]
     }
   },
   "tools": [
@@ -85,6 +89,26 @@
     {
       "name": "delete_edge",
       "description": "Remove a relationship between two nodes."
+    },
+    {
+      "name": "get_context",
+      "description": "Assemble one readable markdown document for a node and its neighbourhood, with headings tracking hop distance and each node labelled by the connector it was reached through."
+    },
+    {
+      "name": "extract_section",
+      "description": "Lift a heading's section out into its own node, leaving the heading and a wikilink behind, and connect the two."
+    },
+    {
+      "name": "inline_section",
+      "description": "Fold a node's content back into the document that links to it, the inverse of extract_section."
+    },
+    {
+      "name": "read_skill_guide",
+      "description": "Read the full Filamental skill guide: how to design a space, choose entity and connector types, and structure a graph well."
+    },
+    {
+      "name": "read_format_reference",
+      "description": "Read the exact on-disk file format: the YAML frontmatter fields of a node and how relationships are stored."
     }
   ]
 }
