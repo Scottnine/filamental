@@ -1,0 +1,52 @@
+name: Verify Homebrew tap token
+
+# The cask bump in mac-release.yml deliberately warns and continues when
+# HOMEBREW_TAP_TOKEN is missing or expired, so that a token problem can never
+# fail a release. The cost of that choice is that a broken token is invisible
+# until Mac users report being stuck on an old version. This is the 20-second
+# check: run it after creating or rotating the token, and any time a release
+# finishes without bumping the cask.
+#
+# The token is a fine-grained PAT scoped to Scottnine/homebrew-filamental with
+# Contents: write, and expires 2027-08-11.
+on:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the token can write to the tap
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$HOMEBREW_TAP_TOKEN" ]; then
+            echo "FAIL: HOMEBREW_TAP_TOKEN is not set on this repository."
+            exit 1
+          fi
+
+          echo "--- effective permissions on the tap ---"
+          PUSH=$(GH_TOKEN="$HOMEBREW_TAP_TOKEN" gh api repos/Scottnine/homebrew-filamental \
+                 --jq '.permissions.push')
+          echo "permissions.push = $PUSH"
+          if [ "$PUSH" != "true" ]; then
+            echo "FAIL: the token cannot push. Check it has Contents: write on"
+            echo "      Scottnine/homebrew-filamental and has not expired."
+            exit 1
+          fi
+
+          # An API permission bit is not the same as the server actually
+          # accepting a ref update, so prove it end to end. A throwaway branch
+          # is a real write that leaves main untouched; --dry-run would not do,
+          # because it never reaches the server's permission check.
+          echo "--- round-tripping a throwaway branch ---"
+          git clone --depth 1 \
+            "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/Scottnine/homebrew-filamental.git" tap
+          cd tap
+          BRANCH="token-check-${GITHUB_RUN_ID}"
+          git push origin "HEAD:refs/heads/${BRANCH}"
+          git push origin --delete "${BRANCH}"
+
+          echo "PASS: the token can write to the tap. Cask bumps will work."
