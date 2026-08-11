@@ -139,6 +139,42 @@ jobs:
             --repo Scottnine/filamental \
             --clobber
 
+      - name: Bump Homebrew cask
+        env:
+          # Fine-grained PAT scoped to Scottnine/homebrew-filamental with
+          # Contents: write. The job's own GITHUB_TOKEN is scoped to
+          # Scottnine/filamental only and cannot push to the tap.
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -z "$HOMEBREW_TAP_TOKEN" ]; then
+            echo "::warning::HOMEBREW_TAP_TOKEN not set — skipping cask bump. Update Scottnine/homebrew-filamental by hand."
+            exit 0
+          fi
+          VERSION="${{ inputs.version }}"
+          VERSION="${VERSION#v}"
+          SHA=$(shasum -a 256 "${{ steps.find_dmg.outputs.path }}" | cut -d' ' -f1)
+          echo "Cask bump: $VERSION / $SHA"
+          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/Scottnine/homebrew-filamental.git" "$RUNNER_TEMP/tap"
+          CASK="$RUNNER_TEMP/tap/Casks/filamental.rb"
+          # Anchored to the leading two-space indent so these only ever match
+          # the cask's own version/sha256 stanzas, never a URL or a comment.
+          sed -i '' -E "s|^  version \".*\"$|  version \"${VERSION}\"|" "$CASK"
+          sed -i '' -E "s|^  sha256 \".*\"$|  sha256 \"${SHA}\"|" "$CASK"
+          # Fail loudly rather than pushing a cask that still points at the
+          # previous release because the sed silently matched nothing.
+          grep -q "version \"${VERSION}\"" "$CASK" || { echo "Cask version not updated"; exit 1; }
+          grep -q "sha256 \"${SHA}\"" "$CASK" || { echo "Cask sha256 not updated"; exit 1; }
+          cd "$RUNNER_TEMP/tap"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Casks/filamental.rb
+          if git diff --cached --quiet; then
+            echo "Cask already at ${VERSION}."
+          else
+            git commit -m "filamental ${VERSION}"
+            git push
+          fi
+
       - name: Update Cloudflare Worker (mac updater entry)
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
