@@ -47,8 +47,10 @@ has_notes: true                             # true if markdown body is non-empty
 Node notes in Markdown here.
 
 Paragraphs, bullet lists, bold text, and headers are all supported.
-Wikilinks [[Node Name]] are supported and create relationships automatically when the
-linked node name matches an existing node in the world.
+Wikilinks [[Node Name]] are supported. They are hyperlinks to another node's page, and
+resolve whenever the linked name matches an existing node in the world. A wikilink does
+not create a connector: connectors are declared deliberately, in the `relationships`
+block above or by drawing one on the canvas.
 
 Leave the body blank only if there is genuinely nothing to say about this node yet.
 Populated notes make the world significantly more useful for both the user and for AI
