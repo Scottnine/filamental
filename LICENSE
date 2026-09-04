@@ -1,21 +1,36 @@
-MIT License
+Filamental Licensing
+Copyright (c) 2026 Filamental. All rights reserved.
 
-Copyright (c) 2026 Filamental
+This repository contains integration code and release automation. It does not
+contain the source of the Filamental application.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+THE FILAMENTAL APPLICATION
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+The Filamental desktop application, distributed from this repository's Releases
+and through Chocolatey, winget, Homebrew, the Microsoft Store and Linux packages,
+is proprietary software and all rights in it are reserved.
+
+It is licensed to end users solely under the terms published at
+https://filamental.space/terms and under no other licence. Nothing in this
+repository grants any right to copy, modify, adapt, reverse engineer,
+sub-license, sell or redistribute the application.
+
+
+MIT-LICENSED COMPONENTS
+
+The following directories are published under the MIT Licence so that
+third-party tools can integrate with the application:
+
+  mcp/      the Filamental MCP server, distributed on npm as filamental-mcp
+  skills/   the Filamental agent skill files
+
+Each carries its own LICENSE file containing the full MIT text. That permission
+extends to those directories only and grants no rights in the application
+itself.
+
+.github/ contains release automation, published for transparency. No licence is
+granted in it.
+
+
+Questions: support@filamental.space

@@ -33,7 +33,14 @@ See [Releases](https://github.com/Scottnine/filamental/releases) for changelogs 
 
 ---
 
-## License
+## Licence
 
-Proprietary. See [filamental.space/terms](https://filamental.space/terms).
+The **Filamental application** is proprietary. All rights reserved. It is licensed to
+end users solely under the terms at [filamental.space/terms](https://filamental.space/terms).
+This repository does not contain its source.
+
+The **MCP server** (`mcp/`) and the **agent skills** (`skills/`) are MIT licensed so that
+third-party tools can integrate with it. That permission covers those directories only.
+
+See [LICENSE](LICENSE) for the full statement.
 
