@@ -1,0 +1,340 @@
+name: Setapp Release
+
+# The macOS build distributed by Setapp. It is a second, separate variant of the
+# same release: different bundle ID, no updater of our own, no licence surface,
+# and MacPaw's framework linked in. Read docs/SETAPP-PLAN.md before changing
+# anything here.
+#
+# Deliberately NOT called by mac-release.yml. Setapp reviews every version by
+# hand, so it belongs on the monthly channel round with Chocolatey, winget and
+# the MS Store rather than in front of their queue on every ad-hoc release. The
+# `filamental-channel-submissions` scheduled task triggers it once a month with
+# the version it has just decided to submit; running it by hand from the Actions
+# tab does the same thing.
+#
+# Everything after the trigger is hands-off: it builds, checks itself against
+# Setapp's requirements, packs the archive their way, and submits for review
+# with release_on_approval, so their approval publishes it without us.
+#
+# Until SETAPP_AUTOMATION_TOKEN exists the preflight job skips the whole thing.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag matching the GitHub release (e.g. v0.3.47)'
+        required: true
+      status:
+        description: 'draft keeps it in the Developer Account; review submits it'
+        required: true
+        default: review
+        type: choice
+        options: [review, draft]
+
+concurrency:
+  group: filamental-setapp-release
+  cancel-in-progress: false
+
+env:
+  # Pinned deliberately. A silent bump to whatever is latest is how an untestable
+  # channel breaks: check the release notes at
+  # https://github.com/MacPaw/Setapp-framework/releases before moving it.
+  SETAPP_FRAMEWORK_VERSION: '5.4.0'
+
+jobs:
+  # Cheap gate so a monthly trigger costs nothing while the token is still
+  # outstanding. Secrets cannot be read in a job-level `if:`, hence a job of its
+  # own rather than a step.
+  preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      have_token: ${{ steps.check.outputs.have_token }}
+    steps:
+      - id: check
+        env:
+          SETAPP_AUTOMATION_TOKEN: ${{ secrets.SETAPP_AUTOMATION_TOKEN }}
+        run: |
+          if [ -n "$SETAPP_AUTOMATION_TOKEN" ]; then
+            echo "have_token=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "have_token=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::SETAPP_AUTOMATION_TOKEN is not set — skipping the Setapp build. Add it as a repository secret once the Setapp Developer Support Representative issues it, and the monthly round picks this up by itself."
+          fi
+
+  build-setapp:
+    needs: preflight
+    if: needs.preflight.outputs.have_token == 'true'
+    runs-on: macos-latest
+
+    steps:
+      - name: Set up SSH agent for Bitbucket
+        uses: webfactory/ssh-agent@v0.10.0
+        with:
+          ssh-private-key: ${{ secrets.BITBUCKET_SSH_KEY }}
+
+      - name: Trust Bitbucket host key
+        run: ssh-keyscan bitbucket.org >> ~/.ssh/known_hosts
+
+      - name: Clone from Bitbucket
+        run: git clone git@bitbucket.org:rappax/feather-lens.git .
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Set up Rust (stable, universal targets)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Cache Rust build artifacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          # Its own key. This variant compiles with --no-default-features
+          # --features setapp, so sharing mac-release.yml's cache would mean
+          # each release thrashing the other's artifacts for no gain.
+          key: ${{ runner.os }}-cargo-setapp-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-setapp-
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build MCP bundle (macOS native)
+        run: cd mcp && npm ci && npm run bundle
+
+      - name: Check the Setapp public key is present
+        run: |
+          if [ ! -f src-tauri/setapp/setappPublicKey.pem ]; then
+            echo "::error::src-tauri/setapp/setappPublicKey.pem is missing. Download it from https://developer.setapp.com/applications (New version → Release info), commit it at exactly that path, and re-run. The filename is not negotiable — the framework looks for that exact name."
+            exit 1
+          fi
+
+      - name: Fetch the Setapp framework
+        run: |
+          set -euo pipefail
+          BASE="https://github.com/MacPaw/Setapp-framework/releases/download/${SETAPP_FRAMEWORK_VERSION}"
+          mkdir -p src-tauri/vendor
+          curl -fsSL -o "$RUNNER_TEMP/Setapp.xcframework.zip" "$BASE/Setapp.xcframework.zip"
+          curl -fsSL -o "$RUNNER_TEMP/SetappFramework-Resources.bundle.zip" "$BASE/SetappFramework-Resources.bundle.zip"
+          /usr/bin/ditto -x -k "$RUNNER_TEMP/Setapp.xcframework.zip" src-tauri/vendor
+          /usr/bin/ditto -x -k "$RUNNER_TEMP/SetappFramework-Resources.bundle.zip" src-tauri/setapp
+          test -f src-tauri/vendor/Setapp.xcframework/macos-arm64_x86_64/libSetapp.a
+          test -d src-tauri/setapp/SetappFramework-Resources.bundle
+          echo "Setapp framework ${SETAPP_FRAMEWORK_VERSION} unpacked."
+
+      - name: Apply the Setapp build variant
+        run: |
+          set -euo pipefail
+          # Tauri merges src-tauri/Info.plist into EVERY macOS build, so the
+          # Setapp-only keys live in Info.setapp.plist and are copied in here,
+          # for this build only. .gitignore keeps the copy from being committed.
+          cp src-tauri/Info.setapp.plist src-tauri/Info.plist
+          # Without the plugin compiled in, these permissions do not resolve and
+          # the build fails at capability validation. Removing the file is also
+          # the point: this variant must carry no updater permissions at all.
+          rm -f src-tauri/capabilities/updater.json
+          grep -q NSUpdateSecurityPolicy src-tauri/Info.plist
+          ! grep -rq '"updater:' src-tauri/capabilities/
+
+      - name: Import Apple Developer ID certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 16)
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security import "$RUNNER_TEMP/certificate.p12" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 \
+            -k "$KEYCHAIN_PATH"
+          security set-key-partition-list \
+            -S apple-tool:,apple: \
+            -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+
+      - name: Sign better_sqlite3.node with Developer ID
+        run: |
+          codesign --force --verify --verbose \
+            --sign "Developer ID Application: Scott Turnbull (V9MB7JL7JZ)" \
+            --timestamp \
+            --options runtime \
+            mcp/bundle/build/Release/better_sqlite3.node
+
+      - name: Write Apple API key for notarization
+        env:
+          APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY }}
+        run: |
+          mkdir -p ~/.private_keys
+          echo "$APPLE_API_KEY_CONTENT" > ~/.private_keys/AuthKey_${{ secrets.APPLE_API_KEY_ID }}.p8
+
+      - name: Clean stale bundle output
+        # Same cache-restore staleness risk as mac-release.yml: actions/cache can
+        # hand back a target/ from an older release, leaving a previous version's
+        # .app beside the fresh one with nothing to tell them apart.
+        run: rm -rf src-tauri/target/universal-apple-darwin/release/bundle
+
+      - name: Build Tauri app (Setapp variant, universal macOS binary)
+        env:
+          APPLE_SIGNING_IDENTITY: "Developer ID Application: Scott Turnbull (V9MB7JL7JZ)"
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          # The frontend half of the same switch as --features setapp. The two
+          # must always move together: the Rust side opens the gates, this side
+          # removes the licence and update surfaces that would fail review.
+          FILAMENTAL_SETAPP: '1'
+          SETAPP_XCFRAMEWORK: ${{ github.workspace }}/src-tauri/vendor/Setapp.xcframework
+          # Deliberately no TAURI_SIGNING_PRIVATE_KEY — that key exists to sign
+          # our own updater artifacts, and this variant must produce none.
+        run: |
+          npm run tauri build -- \
+            --target universal-apple-darwin \
+            --config src-tauri/tauri.setapp.conf.json \
+            --no-default-features \
+            --features setapp
+
+      - name: Verify the built app against Setapp's requirements
+        id: verify
+        run: |
+          set -euo pipefail
+          APP=$(find src-tauri/target/universal-apple-darwin/release/bundle/macos -maxdepth 1 -name "*.app" | head -1)
+          [ -n "$APP" ] || { echo "::error::No .app was produced."; exit 1; }
+          echo "app=$APP" >> "$GITHUB_OUTPUT"
+          PLIST="$APP/Contents/Info.plist"
+          fail=0
+          check() { # check <description> <test result>
+            if [ "$2" = "0" ]; then echo "  ok    $1"; else echo "  FAIL  $1"; fail=1; fi
+          }
+
+          ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$PLIST")
+          # Must be the exact string registered in the portal, with a
+          # hyphen-minus. An en dash here looks identical and never matches.
+          [ "$ID" = "com.filamental.app-setapp" ] && check "bundle ID is $ID" 0 || check "bundle ID is $ID, expected com.filamental.app-setapp" 1
+
+          /usr/libexec/PlistBuddy -c "Print :NSUpdateSecurityPolicy:AllowProcesses:MEHY5QF425" "$PLIST" >/dev/null 2>&1
+          check "NSUpdateSecurityPolicy allows Setapp's agent" $?
+
+          /usr/libexec/PlistBuddy -c "Print :MPSupportedArchitectures" "$PLIST" >/dev/null 2>&1
+          check "MPSupportedArchitectures is declared" $?
+
+          test -f "$APP/Contents/Resources/setappPublicKey.pem"
+          check "setappPublicKey.pem is in the bundle" $?
+
+          test -d "$APP/Contents/Resources/SetappFramework-Resources.bundle"
+          check "SetappFramework-Resources.bundle is in the bundle" $?
+
+          # The whole point of -force_load on a static archive: drop it and the
+          # app still builds, still runs, and simply never activates against
+          # Setapp — a failure that would only surface in their review.
+          if nm -a "$APP/Contents/MacOS/Filamental" 2>/dev/null | grep -qE "STPManager|SetappManager"; then
+            check "Setapp framework is linked in" 0
+          else
+            check "Setapp framework is linked in — no Setapp manager symbol found, so -force_load in src-tauri/build.rs did not take" 1
+          fi
+
+          # Grounds for rejection: a second update path. The Rust plugin, its
+          # capability and its endpoint must all be absent from the binary
+          # rather than merely switched off. (A ~1 KB orphaned JS chunk for the
+          # plugin's JS wrapper does survive in the frontend bundle; with no
+          # command handler and no capability behind it there is nothing it can
+          # invoke. See docs/SETAPP-PLAN.md section 10.4.)
+          if grep -aq "plugin:updater|" "$APP/Contents/MacOS/Filamental"; then
+            check "updater plugin is not compiled into the binary" 1
+          else
+            check "updater plugin is not compiled into the binary" 0
+          fi
+          if grep -aq "api.filamental.space/v1/update" "$APP/Contents/MacOS/Filamental"; then
+            check "no updater endpoint compiled into the binary" 1
+          else
+            check "no updater endpoint compiled into the binary" 0
+          fi
+
+          lipo -archs "$APP/Contents/MacOS/Filamental" | grep -q "x86_64" && \
+            lipo -archs "$APP/Contents/MacOS/Filamental" | grep -q "arm64"
+          check "binary is universal (arm64 + x86_64)" $?
+
+          codesign --verify --deep --strict "$APP" 2>/dev/null
+          check "code signature verifies" $?
+
+          xcrun stapler validate "$APP" >/dev/null 2>&1
+          check "notarization ticket is stapled" $?
+
+          [ "$fail" = "0" ] || { echo "::error::The build does not meet Setapp's requirements — see the failures above."; exit 1; }
+
+      - name: Package the upload archive
+        id: package
+        run: |
+          set -euo pipefail
+          STAGE="$RUNNER_TEMP/setapp-archive"
+          rm -rf "$STAGE" && mkdir -p "$STAGE/Filamental"
+          # Setapp reads the storefront icon from a loose AppIcon.png beside the
+          # .app, never from the bundle. Exact filename, exactly 1024x1024;
+          # a wrong one uploads happily and looks wrong in the catalogue.
+          cp -R "${{ steps.verify.outputs.app }}" "$STAGE/Filamental/"
+          cp src-tauri/icons/setapp/AppIcon.png "$STAGE/Filamental/AppIcon.png"
+          SIZE=$(sips -g pixelWidth -g pixelHeight "$STAGE/Filamental/AppIcon.png" | awk '/pixel(Width|Height)/ {print $2}' | paste -sd x -)
+          [ "$SIZE" = "1024x1024" ] || { echo "::error::AppIcon.png is ${SIZE}, must be 1024x1024. Regenerate with node scripts/build-setapp-icon.mjs"; exit 1; }
+
+          ZIP="$RUNNER_TEMP/Filamental-setapp.zip"
+          # ditto, never Finder or `zip` on a signed bundle: Finder's compressor
+          # adds a __MACOSX folder that fails Setapp's validation, and
+          # --sequesterRsrc keeps the code signature intact through the round trip.
+          /usr/bin/ditto -c -k --sequesterRsrc --keepParent "$STAGE/Filamental" "$ZIP"
+
+          rm -rf "$RUNNER_TEMP/verify" && mkdir -p "$RUNNER_TEMP/verify"
+          /usr/bin/ditto -x -k "$ZIP" "$RUNNER_TEMP/verify"
+          find "$RUNNER_TEMP/verify" -maxdepth 2
+          if find "$RUNNER_TEMP/verify" -name "__MACOSX" | grep -q .; then
+            echo "::error::__MACOSX found in the archive — Setapp rejects it."
+            exit 1
+          fi
+          test -d "$RUNNER_TEMP/verify/Filamental/Filamental.app"
+          test -f "$RUNNER_TEMP/verify/Filamental/AppIcon.png"
+          BYTES=$(stat -f%z "$ZIP")
+          [ "$BYTES" -lt 1073741824 ] || { echo "::error::Archive is ${BYTES} bytes; Setapp caps at 1 GB."; exit 1; }
+          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
+          echo "Archive: $ZIP (${BYTES} bytes)"
+
+      - name: Upload to Setapp
+        env:
+          SETAPP_AUTOMATION_TOKEN: ${{ secrets.SETAPP_AUTOMATION_TOKEN }}
+          VERSION: ${{ inputs.version }}
+          STATUS: ${{ inputs.status }}
+        run: |
+          set -euo pipefail
+          NOTES=$(node scripts/setapp-release-notes.mjs "$VERSION")
+          echo "Submitting ${VERSION} as ${STATUS}, $(printf %s "$NOTES" | wc -c) characters of notes."
+
+          # release_on_approval is what makes this hands-off: Setapp reviews the
+          # build and publishes it themselves on approval, with no second visit
+          # from us. allow_overwrite lets a re-run replace a version still in
+          # draft or review rather than erroring — it cannot touch a published one.
+          RESPONSE=$(curl -sS -X POST "https://developer-api.setapp.com/v1/ci/version" \
+            --write-out "HTTPSTATUS:%{http_code}" \
+            -H "Authorization: Bearer ${SETAPP_AUTOMATION_TOKEN}" \
+            -H "accept: application/json" \
+            -F "release_notes=${NOTES}" \
+            -F "status=${STATUS}" \
+            -F "release_on_approval=true" \
+            -F "beta=false" \
+            -F "allow_overwrite=true" \
+            -F "archive=@${{ steps.package.outputs.zip }};type=application/zip")
+
+          CODE=${RESPONSE##*HTTPSTATUS:}
+          BODY=${RESPONSE%%HTTPSTATUS*}
+          echo "$BODY"
+          case "$CODE" in
+            2*) echo "::notice::Setapp accepted ${VERSION}. It publishes itself once their review approves it." ;;
+            401) echo "::error::SETAPP_AUTOMATION_TOKEN was rejected. Ask the Developer Support Representative for a fresh one."; exit 1 ;;
+            400) echo "::error::Setapp rejected the bundle. The response above says why."; exit 1 ;;
+            *)   echo "::error::Setapp returned ${CODE}."; exit 1 ;;
+          esac
