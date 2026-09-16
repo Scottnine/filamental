@@ -242,13 +242,33 @@ jobs:
           test -d "$APP/Contents/Resources/SetappFramework-Resources.bundle"
           check "SetappFramework-Resources.bundle is in the bundle" $?
 
-          # The whole point of -force_load on a static archive: drop it and the
-          # app still builds, still runs, and simply never activates against
-          # Setapp — a failure that would only surface in their review.
-          if nm -a "$APP/Contents/MacOS/Filamental" 2>/dev/null | grep -qE "STPManager|SetappManager"; then
+          # Proof that -force_load actually took. Without it the linker drops the
+          # whole archive, the app still builds, still runs, and simply never
+          # activates against Setapp — a failure that would only surface in review.
+          #
+          # This used to grep for the plain strings STPManager/SetappManager, which
+          # CANNOT appear: libSetapp.a is Swift and Swift symbols are mangled, so the
+          # module shows up as `$s6Setapp...` (the 6 is the length of "Setapp"). It
+          # therefore failed on the first build whose link had already proved the
+          # archive was present — that run's undefined symbols were referenced FROM
+          # SetappAI.o and MetricsCore.o, objects the linker only names when it is
+          # genuinely pulling them in.
+          #
+          # Matching the mangled module prefix rather than any occurrence of
+          # "setapp": the bundle identifier com.filamental.app-setapp is compiled
+          # into the binary, so a loose string match would pass even if the archive
+          # had been dropped, which is worse than the false failure it replaces.
+          BIN="$APP/Contents/MacOS/Filamental"
+          if nm -a "$BIN" 2>/dev/null | grep -qE '[$]s6Setapp|_OBJC_CLASS_[$]_(STPManager|SetappManager)'; then
             check "Setapp framework is linked in" 0
           else
-            check "Setapp framework is linked in — no Setapp manager symbol found, so -force_load in src-tauri/build.rs did not take" 1
+            # Never fail this one silently: it is the check most likely to be wrong
+            # rather than right, and nobody can run nm against this binary except CI.
+            echo "  ---- any symbol mentioning setapp, for diagnosis ----"
+            nm -a "$BIN" 2>/dev/null | grep -i setapp | head -20 || true
+            echo "  ---- symbol count (0 would mean the binary is stripped) ----"
+            nm -a "$BIN" 2>/dev/null | wc -l || true
+            check "Setapp framework is linked in — no mangled Setapp symbol found" 1
           fi
 
           # Grounds for rejection: a second update path. The Rust plugin, its
