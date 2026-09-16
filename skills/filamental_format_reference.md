@@ -188,8 +188,8 @@ Build a key↔label map at the start of every session and resolve in both direct
 - `type_key` is the value used in node frontmatter `type:` fields, always a lowercase key,
   never the label string
 - `icon` is one of: `sphere`, `cube`, `cylinder`
-- `default_properties` defines which property keys are expected on nodes of this type;
-  `{}` means none are formally defined
+- `default_properties` is **retired**. It is still written, always `{}`, and read by
+  nothing. Properties are project-wide now, in `.filamental/properties.json`
 - The `unclassified` type is always present as a fallback; use it only when nothing else fits
 
 **When scaffolding a new project**, choose type keys that are short, lowercase, and meaningful:
@@ -347,11 +347,23 @@ alone.
 
 ## Properties: Guidance for Writing
 
-Properties are free-form key-value pairs. Keys are strings; values are strings or simple
-types (numbers, booleans).
+Properties are key-value pairs. Keys are strings, and **every value is a string too**.
+Never write a bare YAML boolean: `active: true` makes the parser reject the whole file.
+Write `yes` or `no` instead, which is what the app itself writes. Numbers and dates are
+likewise stored as text, so quote anything YAML would otherwise reinterpret.
 
-When `default_properties` is defined for an entity type, use those keys. When it is `{}`,
-infer appropriate keys from the node's entity type and content.
+**The project has a register of properties**, in `.filamental/properties.json`: an ordered
+list of `{ key, label, field }`, where `field` is one of `text`, `number`, `yesno`, `date`,
+`choice`, `tags`, `link`, `email`, `phone`, `rating3`, `rating5`, `key`. It sits beside
+`entity_types.json` and `connector_types.json` as the project's third vocabulary. Read it
+and reuse its keys, because a property in the register is offered on every node and reads as
+a proper field; a key you invent shows up on that one node marked for removal.
+
+`field` only says how the app reads and edits the string. It never changes the fact that the
+stored value is text. Ratings carry their scale (`quality: 4/5`), so they read on their own.
+
+A `default_properties` block on an entity type is **retired** and read by nothing. Files
+still carry it, empty. Ignore it, and never write keys into it.
 
 **Principle:** properties hold structured facts that are awkward to express in prose notes
 but useful for quick reference, filtering, and AI analysis. Favour things that would go in
