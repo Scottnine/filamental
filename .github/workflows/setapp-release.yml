@@ -196,11 +196,21 @@ jobs:
           # Deliberately no TAURI_SIGNING_PRIVATE_KEY — that key exists to sign
           # our own updater artifacts, and this variant must produce none.
         run: |
+          # Note the SECOND `--`. Tauri v2's CLI has no --no-default-features
+          # of its own; it takes cargo flags as trailing args after an explicit
+          # `--`, and rejects the v1 spelling outright with "unexpected
+          # argument" before compiling anything. --features it DOES understand,
+          # which is what made this look like a working command for months.
+          #
+          # Disabling default features is not cosmetic here: `default` is
+          # ["self-update"], and shipping our own updater alongside Setapp's is
+          # grounds for rejection at review. If this flag ever stops being
+          # passed, the variant still builds and is still wrong.
           npm run tauri build -- \
             --target universal-apple-darwin \
             --config src-tauri/tauri.setapp.conf.json \
-            --no-default-features \
-            --features setapp
+            --features setapp \
+            -- --no-default-features
 
       - name: Verify the built app against Setapp's requirements
         id: verify
