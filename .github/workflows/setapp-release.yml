@@ -264,10 +264,21 @@ jobs:
           else
             # Never fail this one silently: it is the check most likely to be wrong
             # rather than right, and nobody can run nm against this binary except CI.
-            echo "  ---- any symbol mentioning setapp, for diagnosis ----"
-            nm -a "$BIN" 2>/dev/null | grep -i setapp | head -20 || true
-            echo "  ---- symbol count (0 would mean the binary is stripped) ----"
+            # Which of the two causes is it? Compare the binary against the
+            # cdylib: the archive is known to reach the cdylib link (an early
+            # failure named symbols referenced from its objects), so if the
+            # cdylib has them and the binary does not, the link arg is not
+            # reaching the bin. If neither has them, it is dead-stripping.
+            echo "  ---- binary: symbols mentioning setapp ----"
+            nm -a "$BIN" 2>/dev/null | grep -ci setapp || true
+            echo "  ---- binary: total symbols (0 would mean stripped) ----"
             nm -a "$BIN" 2>/dev/null | wc -l || true
+            for DY in $(find src-tauri/target -name "libfilamental_lib.dylib" 2>/dev/null | head -2); do
+              echo "  ---- cdylib $DY: symbols mentioning setapp ----"
+              nm -a "$DY" 2>/dev/null | grep -ci setapp || true
+            done
+            echo "  ---- was -force_load passed? (searching the archive path) ----"
+            grep -rl "force_load" src-tauri/target/*/release/build/*/output 2>/dev/null | head -3 || echo "  (no build-script output found)"
             check "Setapp framework is linked in — no mangled Setapp symbol found" 1
           fi
 
