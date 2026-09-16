@@ -420,18 +420,26 @@ insight.
 
 ## Properties
 
-Properties are custom key-value pairs on nodes, defined per entity type in `entity_types.json`
-under `default_properties`. In practice many projects have `default_properties: {}`: the
-feature is available but not always configured.
+Properties are key-value pairs on nodes. They are **project-wide**, listed in
+`.filamental/properties.json` as `{ key, label, field }`, beside `entity_types.json` and
+`connector_types.json`. A project may have none: the file is often absent or empty.
+
+**Every value is a string**, whatever its `field` says. Never write a bare YAML boolean,
+`active: true` makes the parser reject the whole file; write `yes` or `no`. The old
+per-type `default_properties` block is retired and read by nothing.
 
 **When reading:** treat populated properties as structured facts that sharpen your
 understanding. A bank account node with `balance: "$4.2M"` tells a different story than
 one without.
 
-**When writing:** if an entity type has defined `default_properties`, populate them. If not,
-infer 2 to 3 relevant properties from the node's content and entity type. After writing,
-mention to the user which property keys you used so they can formalise them in
-`entity_types.json` if they want them standard across that type.
+**When writing:** read the register first and reuse its keys. A key in the register is
+offered on every node and reads as a proper field; a key you invent appears on that one
+node marked for removal, so use one only when nothing in the register fits. Then infer 2 to
+3 relevant properties from the node's content and entity type, and tell the user which keys
+you used so they can add them to the register if they want them everywhere.
+
+**Never put a secret in a property.** A `key` field is masked in the app and kept out of the
+app's search, but it is plain text in the file and nothing in a project is encrypted.
 
 **For investigation-style projects specifically**, consider a standard status property on
 whatever entity type represents the individual claims or matters (a `status` or
