@@ -164,6 +164,12 @@ jobs:
           # previous release because the sed silently matched nothing.
           grep -q "version \"${VERSION}\"" "$CASK" || { echo "Cask version not updated"; exit 1; }
           grep -q "sha256 \"${SHA}\"" "$CASK" || { echo "Cask sha256 not updated"; exit 1; }
+          # Homebrew tightens its style rules without warning, and most new ones
+          # are Correctable. Let brew rewrite the cask to its current rules
+          # before it is pushed, so a rule change never reaches the tap as a
+          # failed test. Never fails the release: the tap's own Test cask run,
+          # which this push triggers, corrects and re-checks as the backstop.
+          brew style --fix "$CASK" || echo "::notice::brew style left something for the tap's Test cask run to report."
           cd "$RUNNER_TEMP/tap"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
