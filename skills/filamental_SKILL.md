@@ -200,6 +200,26 @@ When you create a new Filamental project folder, the folder name must follow thi
 lowercase slugs, snake_case, or omit the "Space" suffix. This applies in all environments:
 Cowork, Claude Code, MCP, or any other AI-driven workflow.
 
+**Building new versus working alongside.** Scaffolding a new project and augmenting an
+existing one are different jobs. When you're working on a graph the user already has, use its
+vocabulary and follow their lead; none of the limits below apply. When you're presenting
+something brand new, it's the user's first look at their own material, and a clear picture
+beats a complete one. Keep the structure simple and let the detail live in the notes.
+
+**Step 0, Ask what they're trying to see.** If the purpose isn't clear from the conversation,
+ask one short question before designing anything: are they trying to see all the parts and how
+they fit together, the processes at play, who's responsible for what, what depends on what, or
+something else? The answer decides which relationships to draw, and so which connector types
+the project needs. Keep it to one question, and go ahead without an answer if they'd rather.
+What you must never do is choose a single theme yourself and arrange everything else around it:
+real material often has several threads or none, and a structure bent around one point quietly
+drops whatever doesn't fit.
+
+If the source is substantial (a long conversation, a large document, several files), say
+roughly how big a full structure would be and ask how deep to go. Fifty or more nodes is
+possible, and it's also a lot to take in at first. Offer a first pass at the core of it,
+which they can extend later.
+
 **Step 1, Work out the type vocabulary together.**
 
 Before proposing anything, ask enough questions to understand the domain. Then propose 4 to
@@ -234,6 +254,14 @@ label should complete the sentence "[source node] [label] [target node]" accurat
 Suggest 3 to 5 connector types that cover the dominant relationship patterns in the domain.
 The `universal` connector is always available as a fallback, so the named types should
 handle the relationships that carry real meaning.
+
+**Hold that limit for a new project, even when the material seems to want more.** The number
+of connector types is what decides whether a layout reads clearly or balls up, far more than
+the number of links. A space with five connector types and four links per node lays out
+cleanly; one with eight or nine types and fewer links per node tends to tangle, whatever the weights.
+If one type of relationship keeps falling back to `universal`, that's the signal to add a
+connector later, not up front. Draw only the relationships the material actually states, and
+put the context in the notes rather than in extra lines.
 
 **Connector strength is a separate design decision from connector labels, don't skip it.**
 Every connector type carries two independent properties that are easy to conflate:
@@ -301,7 +329,7 @@ Once confirmed, follow this exact sequence:
 6. Run the integrity checklist from the format reference across the full batch before
    writing anything to disk.
 
-**Node count:** aim for 15 to 40 nodes for a first pass. Fewer than 15 rarely reveals
+**Node count:** aim for 15 to 30 nodes for a first pass. Fewer than 15 rarely reveals
 useful structure. More than 60 to 70 becomes difficult for a person to read and navigate
 on screen. If the topic needs more coverage, suggest splitting into linked projects rather
 than cramming everything into one. This is a human readability limit, not a technical one.
