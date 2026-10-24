@@ -1,0 +1,26 @@
+{
+  "name": "filamental",
+  "displayName": "Filamental",
+  "version": "1.0.0",
+  "description": "Read and write your Filamental knowledge graph from Claude. Search nodes, follow connections, and build structure in the same project the desktop app has open.",
+  "author": {
+    "name": "Filamental",
+    "email": "cosimo@filamental.space",
+    "url": "https://filamental.space"
+  },
+  "homepage": "https://filamental.space",
+  "repository": "https://github.com/Scottnine/filamental",
+  "license": "MIT",
+  "keywords": [
+    "filamental",
+    "knowledge-graph",
+    "graph",
+    "notes",
+    "productivity"
+  ],
+  "icon": "./icon.png",
+  "documentationUrl": "https://filamental.space/help/connect-an-ai-app",
+  "supportUrl": "https://filamental.space/help/account-and-support",
+  "privacyPolicyUrl": "https://filamental.space/privacy",
+  "termsOfServiceUrl": "https://filamental.space/terms"
+}
