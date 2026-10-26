@@ -6,10 +6,31 @@ graph you can explore in 2D and 3D. This plugin lets Claude work in that same
 project. Claude can search your nodes, follow their connections, read the notes
 behind them, and build new structure, and every change shows up in the app.
 
+## What Claude can do
+
+- **Get its bearings.** A structure report says what a project is made of, which
+  nodes carry the most weight, and which are unconnected or have no notes yet.
+- **Read in context.** One call returns a node's notes with its whole
+  neighbourhood inlined as a single readable document.
+- **Answer "how is X connected to Y?"** by finding the shortest chain of
+  connectors between two nodes, and saying how each hop reads.
+- **Search** across names, notes and property values, or filter on any field.
+- **Build and edit.** Create, update and delete nodes and connectors, using the
+  project's own classifications and connector types.
+- **Restructure.** Move a section out of a long note into a node of its own, or
+  fold one back in. The text is moved, never copied, so there is only ever one
+  copy of it.
+
+The skill teaches Claude how to read a Filamental structure and build one that
+stays clear: a small, deliberate vocabulary, reasoning in the notes, and only
+the relationships your material actually states.
+
 ## What you need
 
 - **The Filamental desktop app**, installed, with at least one project opened.
-  Download it at [filamental.space/download](https://filamental.space/download).
+  It's a free download at [filamental.space/download](https://filamental.space/download).
+  On the free plan a project holds 20 nodes, including the ones Claude creates,
+  and Pro has no limit.
 - **Node.js 22 or later**, because the plugin starts the Filamental MCP server
   with `npx`.
 
@@ -29,9 +50,19 @@ behind them, and build new structure, and every change shows up in the app.
 | `.mcp.json` | Starts the Filamental MCP server over stdio |
 | `skills/filamental/SKILL.md` | How Claude should read and build a Filamental structure |
 
+## The tools
+
+| Read | Write |
+| --- | --- |
+| `get_structure_report`, `get_context`, `find_path`, `search_nodes`, `get_node`, `get_connections`, `get_subgraph`, `get_project_info`, `list_node_types`, `list_connector_types`, `read_skill_guide`, `read_format_reference` | `create_node`, `update_node`, `delete_node`, `create_edge`, `delete_edge`, `extract_section`, `inline_section` |
+
+Every tool carries MCP annotations that mark it read-only or say whether it
+changes or deletes content. Each is described in the
+[server's README](https://github.com/Scottnine/filamental/tree/main/mcp#tools).
+
 ## What it runs, reads and writes
 
-The plugin runs one command, `npx -y filamental-mcp@0.2.10`. The first time it
+The plugin runs one command, `npx -y filamental-mcp@0.2.16`. The first time it
 runs, npx downloads that exact version of the
 [`filamental-mcp`](https://www.npmjs.com/package/filamental-mcp) package and its
 dependencies from the public npm registry. Its source is in the

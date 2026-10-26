@@ -8,12 +8,14 @@
 
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import Database from 'better-sqlite3'
 
-import { evaluateFilter, toolGetContext } from '../server.js'
+import {
+  evaluateFilter, parseMarkdownFile, serialiseMarkdownOver, toolGetContext, toolFindPath, toolGetStructureReport,
+} from '../server.js'
 
 // ── evaluateFilter ────────────────────────────────────────────────────────────
 
@@ -283,5 +285,315 @@ describe('toolGetContext', () => {
       db.close()
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+})
+
+// ── toolFindPath ──────────────────────────────────────────────────────────────
+
+/** Add a bare node row. find_path reads names and ids only, never the file. */
+function addBareNode(db: Database.Database, id: string, name: string) {
+  db.prepare(
+    `INSERT INTO entities (id, file_path, name, entity_type, status, version, modified, data_json)
+     VALUES (?, '', ?, 'Person', 'active', 1, '2026-01-01', '{}')`,
+  ).run(id, name)
+}
+
+describe('toolFindPath', () => {
+  test('finds the route, stating each hop from the end it is crossed', () => {
+    const { db, dir } = buildFixture()
+    try {
+      const r = toolFindPath(db, { from: 'a', to: 'c' }) as any
+      assert.equal(r.found, true)
+      assert.equal(r.hops, 2)
+      assert.deepEqual(r.path.map((h: any) => h.from.name), ['Alice', 'Bob'])
+      assert.deepEqual(r.path.map((h: any) => h.to.name), ['Bob', 'Carol'])
+      assert.deepEqual(r.path.map((h: any) => h.connector_type), ['knows', 'reports_to'])
+      assert.equal(r.path[1].label, 'line manager')
+      // e2 is stored c -> b as 'incoming'; crossed from b it reads 'outgoing'.
+      assert.deepEqual(r.path.map((h: any) => h.direction), ['outgoing', 'outgoing'])
+    } finally {
+      db.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('follow refuses to cross an arrow backwards, any does not', () => {
+    const { db, dir } = buildFixture()
+    try {
+      const any = toolFindPath(db, { from: 'c', to: 'a' }) as any
+      assert.equal(any.found, true)
+      assert.equal(any.hops, 2)
+
+      const follow = toolFindPath(db, { from: 'c', to: 'a', direction: 'follow' }) as any
+      assert.equal(follow.found, false)
+      assert.match(follow.message, /following the arrows/)
+
+      const forward = toolFindPath(db, { from: 'a', to: 'c', direction: 'follow' }) as any
+      assert.equal(forward.found, true)
+    } finally {
+      db.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('follow crosses plain and bidirectional lines either way', () => {
+    const { db, dir } = buildFixture()
+    try {
+      addBareNode(db, 'd', 'Dave')
+      addBareNode(db, 'e', 'Erin')
+      db.prepare(
+        `INSERT INTO relationships (edge_id, source_id, target_id, rel_type, direction)
+         VALUES ('e3', 'c', 'd', 'works_with', 'none'), ('e4', 'e', 'd', 'mentors', 'bidirectional')`,
+      ).run()
+      const r = toolFindPath(db, { from: 'd', to: 'e', direction: 'follow' }) as any
+      assert.equal(r.found, true)
+      assert.equal(r.path[0].direction, 'bidirectional')
+    } finally {
+      db.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('looks nodes up by name, case-insensitively', () => {
+    const { db, dir } = buildFixture()
+    try {
+      const r = toolFindPath(db, { from: 'alice', to: '  CAROL ' }) as any
+      assert.equal(r.found, true)
+      assert.equal(r.from.id, 'a')
+      assert.equal(r.to.id, 'c')
+    } finally {
+      db.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('an ambiguous name returns the candidates and asks for a UUID', () => {
+    const { db, dir } = buildFixture()
+    try {
+      addBareNode(db, 'b2', 'Bob')
+      const r = toolFindPath(db, { from: 'a', to: 'Bob' }) as any
+      assert.equal(r.found, false)
+      assert.equal(r.ambiguous, 'to')
+      assert.deepEqual(r.candidates.map((c: any) => c.id).sort(), ['b', 'b2'])
+      assert.match(r.message, /UUID/)
+      // The UUID resolves it.
+      assert.equal((toolFindPath(db, { from: 'a', to: 'b2' }) as any).found, false)
+      assert.equal((toolFindPath(db, { from: 'a', to: 'b' }) as any).found, true)
+    } finally {
+      db.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('no route says so', () => {
+    const { db, dir } = buildFixture()
+    try {
+      addBareNode(db, 'd', 'Dave')
+      const r = toolFindPath(db, { from: 'a', to: 'd' }) as any
+      assert.equal(r.found, false)
+      assert.match(r.message, /No route from Alice to Dave/)
+    } finally {
+      db.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('max_hops caps the search', () => {
+    const { db, dir } = buildFixture()
+    try {
+      assert.equal((toolFindPath(db, { from: 'a', to: 'c', max_hops: 1 }) as any).found, false)
+      assert.equal((toolFindPath(db, { from: 'a', to: 'c', max_hops: 2 }) as any).found, true)
+      // Default is generous enough for the fixture; an absurd value is clamped, not rejected.
+      assert.equal((toolFindPath(db, { from: 'a', to: 'c', max_hops: 999 }) as any).found, true)
+    } finally {
+      db.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('markdown gives one line per hop', () => {
+    const { db, dir } = buildFixture()
+    try {
+      const r = toolFindPath(db, { from: 'a', to: 'c', format: 'markdown' }) as any
+      assert.equal(r.found, true)
+      assert.deepEqual(r.markdown.split('\n'), [
+        '2 hops from Alice to Carol:',
+        '1. Alice → Bob (knows)',
+        '2. Bob → Carol (reports_to: line manager)',
+      ])
+    } finally {
+      db.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('an unknown node and a bad option are rejected', () => {
+    const { db, dir } = buildFixture()
+    try {
+      assert.throws(() => toolFindPath(db, { from: 'a', to: 'nobody' }))
+      assert.throws(() => toolFindPath(db, { from: 'a', to: 'c', direction: 'sideways' }))
+      assert.throws(() => toolFindPath(db, { from: 'a', to: 'c', format: 'xml' }))
+    } finally {
+      db.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+// ── toolGetStructureReport ────────────────────────────────────────────────────
+
+/** The index's search table, which is where the report reads note bodies from. */
+function addSearchIndex(db: Database.Database, bodies: Record<string, string>) {
+  db.exec(`CREATE VIRTUAL TABLE entities_fts USING fts5 (entity_id UNINDEXED, name, body, properties_text)`)
+  for (const [id, body] of Object.entries(bodies)) {
+    db.prepare('INSERT INTO entities_fts(entity_id, name, body, properties_text) VALUES (?, ?, ?, ?)')
+      .run(id, id, body, '')
+  }
+}
+
+describe('toolGetStructureReport', () => {
+  test('summarises the fixture: ranking, load-bearing node, thin record', () => {
+    const { db, dir } = buildFixture()
+    try {
+      addSearchIndex(db, { a: 'Alice notes', b: 'Bob notes', c: '' })
+      const r = toolGetStructureReport(db, dir) as any
+      assert.equal(r.node_count, 3)
+      assert.equal(r.edge_count, 2)
+      assert.match(r.markdown, /^## Structure\nClassifications: Person 3\nConnectors: knows 1 · reports_to 1/)
+      assert.match(r.markdown, /1\. Bob \(Person\): 2 connections/)
+      assert.match(r.markdown, /Removing any of these would split the structure: Bob/)
+      assert.match(r.markdown, /### Thin records \(1\)\nNodes with no notes and no properties: Carol/)
+      assert.doesNotMatch(r.markdown, /Islands|Unconnected/)
+    } finally {
+      db.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('uses the labels from the space configuration', () => {
+    const { db, dir } = buildFixture()
+    try {
+      addSearchIndex(db, { a: 'x', b: 'x', c: 'x' })
+      mkdirSync(join(dir, '.filamental'))
+      writeFileSync(join(dir, '.filamental', 'entity_types.json'), JSON.stringify({ Person: { label: 'People' } }))
+      writeFileSync(join(dir, '.filamental', 'connector_types.json'), JSON.stringify({ reports_to: { label: 'reports to' } }))
+      const r = toolGetStructureReport(db, dir) as any
+      assert.match(r.markdown, /Classifications: People 3/)
+      assert.match(r.markdown, /Connectors: knows 1 · reports to 1/)
+    } finally {
+      db.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('a node missing from the search index counts as having no notes, not as an error', () => {
+    const { db, dir } = buildFixture()
+    try {
+      addSearchIndex(db, { a: 'Alice notes' })
+      const r = toolGetStructureReport(db, dir) as any
+      assert.match(r.markdown, /Thin records \(2\)/)
+    } finally {
+      db.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('an empty space says so', () => {
+    const { db, dir } = buildFixture()
+    try {
+      addSearchIndex(db, {})
+      db.exec('DELETE FROM entities; DELETE FROM relationships;')
+      const r = toolGetStructureReport(db, dir) as any
+      assert.equal(r.node_count, 0)
+      assert.equal(r.markdown, 'This space has no nodes yet.')
+    } finally {
+      db.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+// ── Writing over a note someone else also edits ──────────────────────────────
+
+describe('serialiseMarkdownOver', () => {
+  // Written by the app (unquoted timestamps), then given Obsidian keys and a cover image.
+  const SHARED = [
+    '---',
+    'tags:',
+    '- frontofhouse',
+    'id: n1',
+    'name: Shared',
+    'display_name: Old display',
+    'type: rails',
+    'status: active',
+    'created: 2026-03-02T13:36:20+00:00',
+    'modified: 2026-04-14T17:21:15+00:00',
+    'modified_by: import',
+    'version: 2',
+    'properties: {}',
+    'relationships: []',
+    'attachments: []',
+    'composition_mode: atomic',
+    "child_view_id: ''",
+    'cover_image: .filamental/assets/n1/cover.jpg',
+    'due: 2024-06-01',
+    'aliases:',
+    '- The shared one',
+    '---',
+    '',
+    'Body.',
+    '',
+  ].join('\n')
+
+  test('the app-written timestamps read back as the text they are', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'filamental-mcp-yaml-'))
+    try {
+      const file = join(dir, 'n1.md')
+      writeFileSync(file, SHARED, 'utf-8')
+      const { node } = parseMarkdownFile(file)
+      assert.equal(node.created, '2026-03-02T13:36:20+00:00')
+      assert.equal(node.modified, '2026-04-14T17:21:15+00:00')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('keeps every key it does not own, in place, and its text unchanged', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'filamental-mcp-yaml-'))
+    try {
+      const file = join(dir, 'n1.md')
+      writeFileSync(file, SHARED, 'utf-8')
+      const { node, body } = parseMarkdownFile(file)
+      node.entity_type = 'decision'
+      node.display_name = null
+      node.version += 1
+
+      const out = serialiseMarkdownOver(node, body, SHARED)
+      const lines = out.split('\n')
+      assert.equal(lines[1], 'tags:')
+      assert.ok(lines.includes('  - frontofhouse') || lines.includes('- frontofhouse'))
+      assert.ok(lines.includes('cover_image: .filamental/assets/n1/cover.jpg'), 'the cover image survives')
+      assert.ok(lines.includes('due: 2024-06-01'), 'a date stays as written')
+      assert.ok(lines.includes('created: 2026-03-02T13:36:20+00:00'))
+      assert.ok(lines.includes('type: decision'))
+      assert.ok(lines.includes('version: 3'))
+      assert.ok(out.includes('The shared one'))
+      assert.ok(!out.includes('display_name'), 'a cleared display name is dropped')
+      assert.ok(out.endsWith('\n\nBody.'))
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('a note this server wrote itself is rewritten unchanged in shape', () => {
+    const node = {
+      id: 'n2', name: 'Own', entity_type: 'rails', status: 'active',
+      created: '2026-03-02T13:36:20+00:00', modified: '2026-03-02T13:36:20+00:00', modified_by: 'filamental-mcp',
+      version: 1, properties: { owner: 'Ana' }, relationships: [], attachments: [],
+      composition_mode: 'atomic', child_view_id: '', has_notes: true,
+    }
+    const fresh = serialiseMarkdownOver(node, 'Body.', '')
+    assert.equal(serialiseMarkdownOver(node, 'Body.', fresh), fresh)
+    assert.ok(fresh.includes('created: 2026-03-02T13:36:20+00:00'), 'written unquoted, as the app writes it')
   })
 })

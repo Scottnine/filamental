@@ -22,8 +22,9 @@ MIT-LICENSED COMPONENTS
 The following directories are published under the MIT Licence so that
 third-party tools can integrate with the application:
 
-  mcp/      the Filamental MCP server, distributed on npm as filamental-mcp
-  skills/   the Filamental agent skill files
+  mcp/            the Filamental MCP server, distributed on npm as filamental-mcp
+  claude-plugin/  the Filamental plugin for Claude
+  skills/         the Filamental agent skill files
 
 Each carries its own LICENSE file containing the full MIT text. That permission
 extends to those directories only and grants no rights in the application

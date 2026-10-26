@@ -1,6 +1,6 @@
 ---
 name: filamental
-description: Read and write a Filamental knowledge graph: search nodes, follow connections, and build structure. Use whenever the user asks about their Filamental space, vault, graph or nodes.
+description: Read and write a Filamental knowledge graph: search nodes, follow connections, and build structure. Use whenever the user asks about their Filamental project, space, graph or nodes.
 ---
 
 <!-- GENERATED FILE, do not edit. Source: ai-briefing/core.md + ai-briefing/surface-mcp.md
@@ -56,19 +56,19 @@ Call `list_node_types` and `list_connector_types` first, and use only keys that 
 
 ## READING EFFICIENTLY
 
-`get_context` is usually the right first call: it returns one node's notes plus its neighbourhood inlined as readable markdown, instead of a graph shape you then have to fetch node by node. Use `dry_run` to check the size before pulling a large neighbourhood.
+`get_context` is usually the right first call: it returns one node's notes plus its neighbourhood inlined as readable markdown, instead of a graph shape you then fetch node by node. Use `dry_run` to check the size before pulling a large neighbourhood.
 
 To answer "how is X connected to Y", call `find_path` first rather than walking subgraphs by hand. It takes names or UUIDs and returns the shortest chain of connectors.
 
-When you meet an unfamiliar space, call `get_structure_report` first to orient: it says what the space is made of and where its weight sits, in a few lines.
+On an unfamiliar space, call `get_structure_report` first: it says what the space is made of and where its weight sits.
 
-Use `get_subgraph` when you want structure rather than content, and `get_connections` for a single node's relationships.
+Use `get_subgraph` for structure rather than content, and `get_connections` for one node's relationships.
 
 `search_nodes` does full text. Its optional `filter` queries fields and properties directly, for example `{"type":"person","status":{"$ne":"archived"}}`, and works with no search terms at all.
 
 ## WRITING
 
-`create_node` and `create_edge` add to the structure.
+`create_node` and `create_edge` add to the structure, `delete_node` and `delete_edge` remove from it. `update_node` replaces any `properties` or `relationships` you pass as a whole set.
 
 `extract_section` moves a heading's section into a node of its own, leaving a wikilink and a connector behind. `inline_section` folds it back. Both take `dry_run`, and both move content rather than copying it.
 
@@ -78,4 +78,4 @@ Read the documents first. Then propose the classifications and connector types y
 
 ## GOING DEEPER
 
-`read_skill_guide` gives the full guide to designing a space. `read_format_reference` gives the exact on-disk file format. You do not need either for ordinary work.
+`read_skill_guide` gives the full guide to designing a space, `read_format_reference` the exact on-disk file format. Ordinary work needs neither.

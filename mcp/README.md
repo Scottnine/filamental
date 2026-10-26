@@ -1,115 +1,105 @@
 # filamental-mcp
 
-A local [Model Context Protocol](https://modelcontextprotocol.io/) server that connects AI assistants (Claude Desktop, Claude Code, etc.) directly to your [Filamental](https://filamental.app) knowledge graph.
+The [Model Context Protocol](https://modelcontextprotocol.io/) server for
+[Filamental](https://filamental.space). It lets Claude and other AI apps search, read and build the
+knowledge graph in your Filamental project: the same markdown files the app shows you, so every
+change appears in the app as it happens.
 
-The server reads and writes your vault -- searching nodes, following connections, creating and updating content -- while Filamental is running or closed. It talks to the same SQLite index the app uses, so changes are immediately visible when you open Filamental.
+The server runs on your computer, works whether Filamental is open or closed, and makes no network
+requests of its own.
 
-**Requires Node.js 22+ and Filamental desktop app.**
-
----
-
-## Prerequisites
-
-- [Filamental](https://filamental.app) installed and at least one vault opened (this initialises the SQLite index)
-- Node.js 22 or later
+**Requires** the Filamental desktop app, with the project opened in it at least once, and
+Node.js 22 or later.
 
 ---
 
-## Setup via Filamental
+## Setup
 
-The easiest way to connect is through the app:
+### From Filamental
 
-1. Open Filamental and go to **Settings > AI Integrations**
-2. Click **Connect to Claude Desktop**
-3. Restart Claude Desktop
+Open **Settings › AI**. Under **Connect an AI app**, **Connect** sets up Claude Desktop in one click.
+For any other app, **Show setup** beside **Other AI apps** gives the exact block for that app, with
+the paths for your computer filled in.
 
-Filamental resolves all paths automatically. The MCP follows whichever vault you have open — no restart needed when you switch worlds.
+### By hand
 
----
-
-## Manual setup
-
-Install globally:
-
-```bash
-npm install -g filamental-mcp
-```
-
-Then add to your `claude_desktop_config.json`:
-
-- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
-
-```json
-{
-  "mcpServers": {
-    "filamental": {
-      "command": "node",
-      "args": [
-        "--no-warnings",
-        "/absolute/path/to/node_modules/filamental-mcp/dist/index.js"
-      ]
-    }
-  }
-}
-```
-
-No `--vault` argument needed. The server reads the active vault from Filamental automatically and reconnects when you switch worlds. To pin to a specific vault (e.g. for testing), pass `--vault <absolute-path>` explicitly.
-
-### Claude Code
-
-Add a `.mcp.json` at your project root:
+Add this to your AI app's MCP settings file (`claude_desktop_config.json`, `.mcp.json` for
+Claude Code, `.cursor/mcp.json` and so on):
 
 ```json
 {
   "mcpServers": {
     "filamental": {
       "command": "npx",
-      "args": [
-        "filamental-mcp",
-        "--vault",
-        "/absolute/path/to/your/vault"
-      ]
+      "args": ["-y", "filamental-mcp"]
     }
   }
 }
 ```
 
+No path is needed. The server works on whichever project Filamental has open, and follows you
+when you open another, with no restart. To pin it to one project instead, add
+`"--project", "/absolute/path/to/your/project"` to `args`.
+
 ---
 
 ## Tools
 
-### Read
+### Orient and read
 
-| Tool | Description |
+| Tool | What it does |
 |---|---|
-| `get_vault_info` | Node and edge counts plus entity and connector type names |
-| `list_node_types` | Full entity type configuration for this vault |
-| `list_connector_types` | Full connector type configuration for this vault |
-| `search_nodes` | Full-text search across node names, note bodies and property values |
-| `get_node` | Full node record by UUID |
-| `get_connections` | All edges connected to a node, reported from that node's point of view (see [Arrow direction](#arrow-direction)) |
-| `get_subgraph` | BFS traversal from a root node up to N hops (max depth 3) |
+| `get_structure_report` | A short orientation to the whole project: its classifications and connectors, the most connected nodes, the load-bearing ones, separate groups, and nodes that are unconnected or have no notes |
+| `get_context` | One node's notes plus its neighbourhood, inlined as one readable markdown document. `dry_run` sizes it first |
+| `find_path` | The shortest chain of connectors between two nodes, by name or UUID, with how each hop reads |
+| `search_nodes` | Full-text search across names, notes and property values, with an optional field `filter` that also works on its own |
+| `get_node` | One node's full record, notes included |
+| `get_connections` | Every connector on a node, stated from that node's point of view (see [Arrow direction](#arrow-direction)) |
+| `get_subgraph` | Every node and connector within up to 3 hops of a node |
+| `get_project_info` | Node and connector counts, and the classification and connector type names |
+| `list_node_types` | The project's classifications (entity types), with their colours and settings |
+| `list_connector_types` | The project's connector types, with their colours, directions and weights |
 
 ### Write
 
-| Tool | Description |
+| Tool | What it does |
 |---|---|
-| `create_node` | Create a new node -- writes a markdown file and updates the SQLite index |
-| `update_node` | Update an existing node; omitted fields are unchanged |
-| `delete_node` | Delete a node and remove it from the index |
-| `create_edge` | Add a relationship between two nodes |
-| `delete_edge` | Remove a relationship between two nodes |
+| `create_node` | Create a node: writes its markdown file and updates the index |
+| `update_node` | Change a node. Omitted fields stay as they are; a `properties` or `relationships` you pass replaces the whole set |
+| `delete_node` | Delete a node and its file |
+| `create_edge` | Connect two nodes |
+| `delete_edge` | Remove a connector |
+| `extract_section` | Move a heading's section out of a node into a node of its own, leaving a `[[wikilink]]` and a connector behind. `dry_run` previews it |
+| `inline_section` | Fold a node's content back into another: the inverse of `extract_section`. `dry_run` previews it |
+
+The content is moved, never copied, so exactly one copy of any text survives.
+
+### Guides
+
+| Tool | What it does |
+|---|---|
+| `read_skill_guide` | The full guide to designing a Filamental structure. The server sends the essentials when it connects, so this is for depth |
+| `read_format_reference` | The exact on-disk format of node files and the `.filamental/` folder |
+
+Every tool carries MCP annotations (`readOnlyHint`, `destructiveHint`), so your AI app can tell the
+read-only tools from the ones that change or delete content.
+
+On Filamental's free plan a project holds 20 nodes, not counting bridges, and that includes nodes
+an AI creates: `create_node` says so when a project is full. Pro has no limit.
 
 ---
 
 ## Arrow direction
 
-A connector's `direction` is one of `none`, `outgoing`, `incoming` or `bidirectional`. Nothing else is accepted, and an unrecognised value is rejected rather than stored.
+A connector's `direction` is one of `none`, `outgoing`, `incoming` or `bidirectional`. Nothing else
+is accepted, and an unrecognised value is rejected rather than stored.
 
-On **writes** (`create_edge`, `create_node`, `update_node`) direction is stated relative to `source` → `target`: `outgoing` draws the arrowhead at the target, `incoming` draws it back at the source, `bidirectional` draws both, `none` is a plain line.
+On **writes** (`create_edge`, `create_node`, `update_node`) direction is stated relative to
+`source` → `target`: `outgoing` draws the arrowhead at the target, `incoming` draws it back at the
+source, `bidirectional` draws both, `none` is a plain line.
 
-On **reads** (`get_connections`) direction is instead stated relative to the node you asked about, because that is what the user sees on screen:
+On **reads** (`get_connections`) direction is instead stated relative to the node you asked about,
+because that is what the user sees on screen:
 
 | Field | Meaning |
 |---|---|
@@ -118,47 +108,53 @@ On **reads** (`get_connections`) direction is instead stated relative to the nod
 | `direction` | Where the arrowhead is drawn, as seen from `node` |
 | `stored_on` | Which node's file holds the relationship |
 
-This distinction matters. Which end of a connector is stored as `source` is decided by whichever end the user happened to drag from when drawing it, and is invisible on the graph — an undirected connector looks identical either way round. So the same arrow reads as `outgoing` from one end and `incoming` from the other, and `get_connections` flips it for you. Filtering with `direction: "outgoing"` gives you edges whose arrow points *away from* the node you asked about, never edges that merely happen to be stored with it as `source`. A `bidirectional` edge matches both `outgoing` and `incoming` filters, since it genuinely points both ways; `undirected` matches only edges with no arrow at all.
+This matters because which end of a connector is stored as `source` is simply whichever end the
+user happened to drag from, and it's invisible on the graph: an undirected connector looks the same
+either way round. So the same arrow reads as `outgoing` from one end and `incoming` from the other,
+and `get_connections` flips it for you. Filtering with `direction: "outgoing"` gives the edges whose
+arrow points *away from* the node you asked about. A `bidirectional` edge matches both `outgoing`
+and `incoming`, since it genuinely points both ways; `undirected` matches only edges with no arrow.
 
-Use `stored_on` only if you are editing the underlying Markdown file directly. It says nothing about what the arrow does.
+Use `stored_on` only if you're editing the underlying markdown file directly. It says nothing
+about what the arrow does.
 
 ---
 
 ## CLI options
 
 ```
-filamental-mcp --vault <path>          Use vault at <path>
-filamental-mcp --vault <path> --db <path>   Override the SQLite database path (for testing)
+filamental-mcp                              Follow the project Filamental has open
+filamental-mcp --project <path>             Pin to the project at <path>
+filamental-mcp --project <path> --db <path> Also override the SQLite index path (for testing)
 ```
 
 ---
 
 ## How it works
 
-Filamental stores all node data as Markdown files with YAML frontmatter inside your vault folder. It also maintains a SQLite index (stored in your OS app-config directory, not inside the vault) for fast full-text search and graph traversal.
+Every node in a Filamental project is a markdown file with YAML front matter, inside the project
+folder. The app also keeps a SQLite index of each project for fast search and traversal, stored in
+the app's own settings folder rather than in the project.
 
-This server opens that SQLite index read-write. Read tools query it directly. Write tools update both the Markdown file on disk and the SQLite index so the Filamental app sees changes immediately on next load.
+The server opens that index. Read tools query it; write tools update the markdown file and the
+index together, and keep any front-matter fields they don't own (Obsidian's `tags` and `aliases`,
+say) exactly where they were.
 
 ---
 
 ## Compatibility
 
-| filamental-mcp | Filamental app | DB schema |
+| filamental-mcp | Filamental app | Index schema |
 |---|---|---|
-| 0.2.6+ | 0.3.0 and later (current) | v6 |
+| 0.2.6 and later | 0.3.0 and later | v6 |
 | 0.2.0 – 0.2.5 | 0.2.x | v5 |
 
-The server keeps working even on a schema mismatch (the DB is a disposable index, so most read/write operations tolerate drift). If a tool call fails for an unrelated reason while versions are mismatched, the error message is annotated with which side to update.
+On a schema mismatch the server keeps working where it can, since the index is disposable, and
+annotates any failing call with which side to update.
 
 ---
 
-## Known limitations
+## Licence
 
-- The pre-built binary (`better-sqlite3`) is Windows x64 only. Other platforms require building from source.
-- Auto-config via Filamental Settings has been tested on Windows. macOS path resolution is included but untested.
-
----
-
-## License
-
-[MIT](https://opensource.org/licenses/MIT) — Copyright Filamental
+[MIT](https://opensource.org/licenses/MIT). The Filamental desktop app itself is proprietary; its
+terms are at [filamental.space/terms](https://filamental.space/terms).

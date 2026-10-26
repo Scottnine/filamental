@@ -1,16 +1,15 @@
 {
   "name": "filamental-mcp",
-  "version": "0.2.9",
+  "version": "0.2.16",
   "mcpName": "io.github.Scottnine/filamental",
-  "description": "MCP server exposing your Filamental vault to AI assistants (Claude, Claude Code, etc.)",
+  "description": "MCP server for Filamental: lets Claude and other AI apps search, read and build your knowledge graph",
   "type": "module",
-  "main": "dist/index.js",
+  "main": "lib/index.js",
   "bin": {
-    "filamental-mcp": "dist/index.js"
+    "filamental-mcp": "lib/index.js"
   },
   "files": [
-    "dist/index.js",
-    "dist/build",
+    "lib/*.js",
     "README.md"
   ],
   "keywords": [
@@ -38,7 +37,8 @@
     "bundle": "tsc && npx @vercel/ncc build dist/index.js -o bundle --no-source-map-register && node scripts/patch-bundle.cjs",
     "dev": "tsx src/index.ts",
     "test": "tsx --test src/__tests__/*.test.ts",
-    "prepublishOnly": "npm run bundle && node ../scripts/stage-mcp.js"
+    "prepublishOnly": "npm run build:npm",
+    "build:npm": "node -e \"require('fs').rmSync('lib',{recursive:true,force:true})\" && tsc --outDir lib"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

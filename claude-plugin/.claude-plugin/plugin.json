@@ -1,7 +1,7 @@
 {
   "name": "filamental",
   "displayName": "Filamental",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Read and write your Filamental knowledge graph from Claude. Search nodes, follow connections, and build structure in the same project the desktop app has open.",
   "author": {
     "name": "Filamental",

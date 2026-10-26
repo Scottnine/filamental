@@ -1,6 +1,7 @@
-// Tests for the structural refactor tools: extract_section and inline_section.
-// These write real files, so every fixture builds a throwaway vault in the OS
-// temp directory and removes it afterwards. No real vault is ever touched.
+// Tests for the write tools: the structural refactors (extract_section, inline_section),
+// create_node and update_node, and the annotations every tool carries. These write real
+// files, so every fixture builds a throwaway vault in the OS temp directory and removes
+// it afterwards. No real vault is ever touched.
 
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
@@ -9,7 +10,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import Database from 'better-sqlite3'
 
-import { toolExtractSection, toolInlineSection } from '../server.js'
+import { TOOLS, toolCreateNode, toolExtractSection, toolInlineSection, toolUpdateNode } from '../server.js'
 
 /**
  * A writable temp vault. Unlike the read-only fixtures this creates the FTS
@@ -342,6 +343,74 @@ describe('inline_section', () => {
     } finally {
       db.close()
       rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('create_node and update_node', () => {
+  test('relationships take the same four directions as create_edge, and nothing else', () => {
+    const { db, dir, addNode } = buildWritableVault()
+    try {
+      addNode('t1', 'Target', 'Body.')
+      const made = toolCreateNode(db, dir, {
+        name: 'Both ways',
+        relationships: [{ target: 't1', rel_type: 'links', direction: 'bidirectional' }],
+      }) as { id: string; file_path: string }
+      assert.match(readFileSync(made.file_path, 'utf-8'), /direction: bidirectional/)
+
+      assert.throws(
+        () => toolCreateNode(db, dir, {
+          name: 'Bad arrow',
+          relationships: [{ target: 't1', rel_type: 'links', direction: 'sideways' }],
+        }),
+        /Invalid direction "sideways"/,
+      )
+      assert.throws(
+        () => toolUpdateNode(db, dir, {
+          id: made.id,
+          relationships: [{ target: 't1', rel_type: 'links', direction: 'both' }],
+        }),
+        /Invalid direction "both"/,
+      )
+    } finally {
+      db.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('create_node sets a display name, and an empty one is left off', () => {
+    const { db, dir } = buildWritableVault()
+    try {
+      const titled = toolCreateNode(db, dir, { name: 'Ada Lovelace (mathematician)', display_name: 'Ada Lovelace' }) as { file_path: string }
+      assert.match(readFileSync(titled.file_path, 'utf-8'), /display_name: Ada Lovelace\n/)
+      const plain = toolCreateNode(db, dir, { name: 'Plain', display_name: '' }) as { file_path: string }
+      assert.doesNotMatch(readFileSync(plain.file_path, 'utf-8'), /display_name/)
+    } finally {
+      db.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('tool annotations', () => {
+  test('every tool has a title and says whether it reads, writes or destroys', () => {
+    for (const tool of TOOLS) {
+      const a = tool.annotations as Record<string, unknown>
+      assert.ok(typeof a?.title === 'string' && a.title, `${tool.name} has no title`)
+      assert.equal(typeof a.readOnlyHint, 'boolean', `${tool.name} has no readOnlyHint`)
+      if (!a.readOnlyHint) assert.equal(typeof a.destructiveHint, 'boolean', `${tool.name} has no destructiveHint`)
+      assert.equal(a.openWorldHint, false, `${tool.name} is local-only`)
+    }
+  })
+
+  test('the deleting tools are marked destructive, the reading ones read-only', () => {
+    const by = Object.fromEntries(TOOLS.map(t => [t.name, t.annotations as Record<string, unknown>]))
+    for (const name of ['delete_node', 'delete_edge', 'update_node', 'inline_section']) {
+      assert.equal(by[name].destructiveHint, true, name)
+    }
+    assert.ok(by['get_project_info'] && !by['get_vault_info'], 'listed as get_project_info, never by its old name')
+    for (const name of ['search_nodes', 'get_node', 'get_context', 'find_path', 'get_structure_report']) {
+      assert.equal(by[name].readOnlyHint, true, name)
     }
   })
 })

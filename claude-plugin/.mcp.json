@@ -2,7 +2,7 @@
   "mcpServers": {
     "filamental": {
       "command": "npx",
-      "args": ["-y", "filamental-mcp@0.2.10"]
+      "args": ["-y", "filamental-mcp@0.2.16"]
     }
   }
 }

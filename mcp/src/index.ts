@@ -64,12 +64,12 @@ function schemaVersionHint(detected: number): string {
   if (detected > SUPPORTED_SCHEMA_VERSION) {
     return (
       `Version mismatch: your Filamental app uses schema v${detected} but this MCP only supports v${SUPPORTED_SCHEMA_VERSION}. ` +
-      `To fix:\n  1. Open a terminal\n  2. Run: npm update -g filamental-mcp\n  3. Restart Claude Desktop`
+      `To fix:\n  1. Update filamental-mcp to its latest version (npm update -g filamental-mcp if you installed it globally)\n  2. Restart your AI app`
     )
   }
   return (
     `Version mismatch: this MCP expects schema v${SUPPORTED_SCHEMA_VERSION} but detected v${detected}. ` +
-    `To fix:\n  1. Download the latest Filamental app at https://filamental.app\n  2. Install it\n  3. Restart Claude Desktop`
+    `To fix:\n  1. Download the latest Filamental app at https://filamental.space/download\n  2. Install it\n  3. Restart your AI app`
   )
 }
 
@@ -88,7 +88,7 @@ function openVault(vaultPath: string, explicitDb?: string): ActiveState {
   if (!existsSync(dbPath)) {
     throw new Error(
       `Filamental database not found at ${dbPath}.\n` +
-      `Open this vault in Filamental at least once so the SQLite index is initialised.`,
+      `Open this project in Filamental at least once so the SQLite index is initialised.`,
     )
   }
   const db = new Database(dbPath)
@@ -115,41 +115,57 @@ function openVault(vaultPath: string, explicitDb?: string): ActiveState {
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2))
-  const explicitVault = args['vault'] ? resolve(args['vault']) : undefined
+  // --project; --vault is its name before 0.2.16, still written by older configs.
+  const projectArg    = args['project'] ?? args['vault']
+  const explicitVault = projectArg ? resolve(projectArg) : undefined
   const explicitDb    = args['db']    ? resolve(args['db'])    : undefined
 
-  // Resolve the initial vault path: explicit arg → active-vault file
-  let initialVaultPath: string
+  // Resolve the initial vault path: explicit arg → active-vault file.
+  // Null when the last project Filamental opened has since been moved or deleted:
+  // the server still starts, and the watcher below picks up the next project opened.
+  let initialVaultPath: string | null = null
+  let missingVaultPath: string | null = null
 
   if (explicitVault) {
     if (!existsSync(explicitVault)) {
-      console.error(`Error: vault path does not exist: ${explicitVault}`)
+      console.error(`Error: project path does not exist: ${explicitVault}`)
       process.exit(1)
     }
     initialVaultPath = explicitVault
   } else {
     const active = readActiveVault()
     if (!active) {
-      console.error('Error: no vault path supplied and no active-vault file found.')
+      console.error('Error: no project path supplied and no active-vault file found.')
       console.error('')
       console.error('Either:')
-      console.error('  1. Open a vault in Filamental (it writes the active-vault file automatically), or')
-      console.error('  2. Pass --vault <path> explicitly.')
+      console.error('  1. Open a project in Filamental (it writes the active-vault file automatically), or')
+      console.error('  2. Pass --project <path> explicitly.')
       process.exit(1)
     }
-    if (!existsSync(active)) {
-      console.error(`Error: active vault path does not exist: ${active}`)
-      process.exit(1)
+    if (existsSync(active)) {
+      initialVaultPath = active
+    } else {
+      missingVaultPath = active
+      console.error(`[filamental-mcp] last project no longer exists: ${active} (waiting for a project to open)`)
     }
-    initialVaultPath = active
   }
 
   // Open the initial DB connection
-  try {
-    activeState = openVault(initialVaultPath, explicitDb)
-  } catch (err) {
-    console.error(`Error: ${err}`)
-    process.exit(1)
+  if (initialVaultPath) {
+    try {
+      activeState = openVault(initialVaultPath, explicitDb)
+    } catch (err) {
+      console.error(`Error: ${err}`)
+      process.exit(1)
+    }
+  }
+
+  const current = (): ActiveState => {
+    if (activeState) return activeState
+    throw new Error(
+      `The last project Filamental opened no longer exists (${missingVaultPath}). ` +
+      `Open a project in Filamental, then try again.`,
+    )
   }
 
   // Watch the active-vault file for changes (user switched worlds in Filamental).
@@ -166,7 +182,7 @@ async function main(): Promise<void> {
         activeState?.db.close()
         activeState = next
         // Notify via stderr so Claude Desktop can surface the switch if desired
-        console.error(`[filamental-mcp] vault switched → ${newPath}`)
+        console.error(`[filamental-mcp] project switched → ${newPath}`)
       } catch {
         // Keep the old connection alive if the new vault's DB isn't ready yet
       }
@@ -175,9 +191,9 @@ async function main(): Promise<void> {
 
   // Create the MCP server — it reads activeState on each tool call via the getter
   const server = createServer(
-    () => activeState!.db,
-    () => activeState!.vaultPath,
-    () => activeState!.schemaHint,
+    () => current().db,
+    () => current().vaultPath,
+    () => activeState?.schemaHint ?? null,
   )
 
   const transport = new StdioServerTransport()

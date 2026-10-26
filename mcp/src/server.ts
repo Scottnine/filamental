@@ -5,9 +5,14 @@ import { randomUUID } from 'crypto'
 import { readFileSync, statSync, writeFileSync, mkdirSync, existsSync, unlinkSync } from 'fs'
 import { join, dirname, resolve, sep } from 'path'
 import { helpWorldDir } from './paths.js'
+import { freeCapReached, NODE_LIMIT_MESSAGE } from './freeCap.js'
 // Compiled from ai-briefing/*.md. Sent in the initialize response so the client
 // hands it to the model at connect time and no user has to install a skill file.
 import { INSTRUCTIONS } from './briefing.generated.js'
+// Copied verbatim from the app by scripts/build-graph-algorithms.mjs, so the
+// route the assistant finds is the route the app lights.
+import { shortestPath, type Adjacency } from './graphAlgorithms.generated.js'
+import { buildStructureSection } from './structureReport.generated.js'
 import Database from 'better-sqlite3'
 import * as yaml from 'js-yaml'
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
@@ -94,7 +99,15 @@ function fileMtimeSecs(filePath: string): number {
 
 // ── Markdown serialisation / parsing ──────────────────────────────────────────
 
-function serialiseMarkdown(node: NodeRecord, body: string): string {
+/**
+ * Front matter is read and written as YAML's JSON schema: a timestamp or a date stays the text
+ * it was. js-yaml's default schema turns an unquoted `created: 2026-03-02T13:36:20+00:00` (how
+ * the app writes it) into a Date, which then came back as "Mon Mar 02 2026 ... (GMT)", and
+ * would reformat a date someone wrote in Obsidian. The app's own reader keeps them as text too.
+ */
+const PLAIN_YAML = yaml.JSON_SCHEMA
+
+function frontmatterFor(node: NodeRecord): Record<string, unknown> {
   const frontmatter: Record<string, unknown> = {
     id: node.id,
     name: node.name,
@@ -124,12 +137,57 @@ function serialiseMarkdown(node: NodeRecord, body: string): string {
 
   if (node.display_name != null) frontmatter['display_name'] = node.display_name
   if (node.category != null) frontmatter['category'] = node.category
+  return frontmatter
+}
 
-  const yamlStr = yaml.dump(frontmatter, { lineWidth: -1 })
+function serialiseMarkdown(node: NodeRecord, body: string): string {
+  const yamlStr = yaml.dump(frontmatterFor(node), { lineWidth: -1, schema: PLAIN_YAML })
   return `---\n${yamlStr}---\n\n${body.trim()}`
 }
 
-function parseMarkdownFile(filePath: string): { node: NodeRecord; body: string } {
+/**
+ * The front-matter keys frontmatterFor writes. Every other key in a note belongs to someone
+ * else (Obsidian's tags and aliases, the app's cover image, the user's own fields) and is never
+ * ours to drop: people work on the same folder in Obsidian, in the app and through here.
+ */
+const OWNED_KEYS = new Set([
+  'id', 'name', 'display_name', 'type', 'status', 'created', 'modified', 'modified_by', 'version',
+  'properties', 'relationships', 'attachments', 'composition_mode', 'child_view_id', 'has_notes', 'category',
+])
+
+/**
+ * A node written over its existing file: the keys this server owns take the node's values in
+ * the place the file had them, and every other key is kept where it was. A note the app wrote
+ * itself comes out as serialiseMarkdown writes it.
+ */
+export function serialiseMarkdownOver(node: NodeRecord, body: string, existing: string): string {
+  let previous: Record<string, unknown> | null = null
+  const match = /^﻿?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(existing)
+  try {
+    const loaded = match ? yaml.load(match[1], { schema: PLAIN_YAML }) : null
+    if (loaded && typeof loaded === 'object' && !Array.isArray(loaded)) previous = loaded as Record<string, unknown>
+  } catch { /* unreadable front matter: the node is written fresh */ }
+  if (!previous) return serialiseMarkdown(node, body)
+
+  const ours = frontmatterFor(node)
+  const merged: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(previous)) {
+    if (!OWNED_KEYS.has(key)) merged[key] = value
+    else if (key in ours) merged[key] = ours[key]
+    // An owned key the node no longer carries (a cleared display name) is dropped.
+  }
+  for (const [key, value] of Object.entries(ours)) if (!(key in merged)) merged[key] = value
+  return `---\n${yaml.dump(merged, { lineWidth: -1, schema: PLAIN_YAML })}---\n\n${body.trim()}`
+}
+
+/** Every rewrite of an existing note goes through here, never through serialiseMarkdown. */
+function writeNodeFile(filePath: string, node: NodeRecord, body: string): void {
+  let existing = ''
+  try { existing = readFileSync(filePath, 'utf-8') } catch { /* gone: written fresh */ }
+  writeFileSync(filePath, serialiseMarkdownOver(node, body, existing), 'utf-8')
+}
+
+export function parseMarkdownFile(filePath: string): { node: NodeRecord; body: string } {
   const raw = readFileSync(filePath, 'utf-8')
 
   // Split on opening --- and closing ---
@@ -141,7 +199,7 @@ function parseMarkdownFile(filePath: string): { node: NodeRecord; body: string }
   const yamlPart = raw.slice(4, closeIdx)
   const body = raw.slice(closeIdx + 5) // skip \n---\n
 
-  const fm = yaml.load(yamlPart) as Record<string, unknown>
+  const fm = yaml.load(yamlPart, { schema: PLAIN_YAML }) as Record<string, unknown>
 
   const relationships: RelationshipRecord[] = ((fm['relationships'] as unknown[]) ?? []).map(r => {
     const rel = r as Record<string, unknown>
@@ -282,9 +340,17 @@ function validateName(name: unknown): string {
 
 // ── Tool schemas ──────────────────────────────────────────────────────────────
 
-const TOOLS = [
+// MCP tool annotations. Every tool works on the local project only, so none is open-world.
+// Replacing a node's notes or properties loses the old values, so update_node counts as
+// destructive alongside the deletes; inline_section deletes its target by default.
+const READ_ONLY = { readOnlyHint: true, openWorldHint: false }
+const WRITES = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
+const REPLACES_OR_DELETES = { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false }
+
+export const TOOLS = [
   {
     name: 'search_nodes',
+    annotations: { title: 'Search nodes', ...READ_ONLY },
     description:
       'Full-text search across entity names, note bodies and property values. ' +
       'Returns matching nodes with a contextual snippet. ' +
@@ -311,6 +377,7 @@ const TOOLS = [
   },
   {
     name: 'get_node',
+    annotations: { title: 'Get node', ...READ_ONLY },
     description: 'Retrieve full node data for a given entity UUID, including the markdown note body in the `notes` field.',
     inputSchema: {
       type: 'object' as const,
@@ -322,6 +389,7 @@ const TOOLS = [
   },
   {
     name: 'get_connections',
+    annotations: { title: 'Get connections', ...READ_ONLY },
     description:
       'Get every edge connected to a node. Each result is stated from the point of ' +
       'view of the node you asked about: `node` is that node, `other` is the node at ' +
@@ -351,6 +419,7 @@ const TOOLS = [
   },
   {
     name: 'get_subgraph',
+    annotations: { title: 'Get subgraph', ...READ_ONLY },
     description:
       'BFS traversal from a root node collecting all reachable nodes and edges ' +
       'up to the given hop depth. Results are deduplicated.',
@@ -364,7 +433,48 @@ const TOOLS = [
     },
   },
   {
+    name: 'find_path',
+    annotations: { title: 'Find path', ...READ_ONLY },
+    description:
+      'Find the shortest chain of connectors between two nodes, and say how each hop ' +
+      'reads. Use this to answer "how is X connected to Y" instead of walking ' +
+      'get_subgraph by hand. Returns the hops in order, or found: false when there is ' +
+      'no route within max_hops. Ties between equal-length routes resolve the same way ' +
+      'every time.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        from: {
+          type: 'string',
+          description:
+            'Start node: an entity UUID, or an exact name (case-insensitive). If a name ' +
+            'matches more than one node the candidates come back and you retry with a UUID.',
+        },
+        to: { type: 'string', description: 'End node, same forms as "from".' },
+        direction: {
+          type: 'string',
+          enum: ['any', 'follow'],
+          description:
+            'Default "any" ignores arrowheads and finds any connection, which is what ' +
+            '"how are these related" means. "follow" only crosses a connector the way ' +
+            'its arrow points: an outgoing arrow is crossed from its tail to its head, ' +
+            'and a bidirectional or plain line is crossed either way.',
+        },
+        max_hops: { type: 'number', description: 'Longest route to look for (default 6, max 12)' },
+        format: {
+          type: 'string',
+          enum: ['json', 'markdown'],
+          description:
+            'Default "json": structured hops. "markdown": one readable line per hop, ' +
+            'ready to quote to the user.',
+        },
+      },
+      required: ['from', 'to'],
+    },
+  },
+  {
     name: 'get_context',
+    annotations: { title: 'Get context', ...READ_ONLY },
     description:
       'Assemble one readable markdown document for a node and its neighbourhood: ' +
       'the node\'s notes plus the notes of every node within `depth` hops, inlined ' +
@@ -403,9 +513,24 @@ const TOOLS = [
     },
   },
   {
-    name: 'list_node_types',
+    name: 'get_structure_report',
+    annotations: { title: 'Get structure report', ...READ_ONLY },
     description:
-      'Return the full entity type configuration for this vault ' +
+      'A short orientation to the whole space as markdown: what classifications and ' +
+      'connectors it uses, which nodes are most connected, which are load-bearing (removing ' +
+      'one would split the structure), how many separate groups there are, and which nodes ' +
+      'are unconnected or have no notes. Call this first on an unfamiliar space, before ' +
+      'searching or reading nodes. Takes no parameters.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {},
+    },
+  },
+  {
+    name: 'list_node_types',
+    annotations: { title: 'List entity types', ...READ_ONLY },
+    description:
+      'Return the full entity type configuration for this project ' +
       '(from .filamental/entity_types.json).',
     inputSchema: {
       type: 'object' as const,
@@ -414,8 +539,9 @@ const TOOLS = [
   },
   {
     name: 'list_connector_types',
+    annotations: { title: 'List connector types', ...READ_ONLY },
     description:
-      'Return the full connector type configuration for this vault ' +
+      'Return the full connector type configuration for this project ' +
       '(from .filamental/connector_types.json).',
     inputSchema: {
       type: 'object' as const,
@@ -423,10 +549,11 @@ const TOOLS = [
     },
   },
   {
-    name: 'get_vault_info',
+    name: 'get_project_info',
+    annotations: { title: 'Get project info', ...READ_ONLY },
     description:
       'Return summary counts (nodes, edges) and the top-level entity and ' +
-      'connector type names configured for this vault.',
+      'connector type names configured for this project.',
     inputSchema: {
       type: 'object' as const,
       properties: {},
@@ -434,13 +561,18 @@ const TOOLS = [
   },
   {
     name: 'create_node',
+    annotations: { title: 'Create node', ...WRITES },
     description:
-      'Create a new node in the vault. Writes a markdown file and updates the SQLite index. ' +
+      'Create a new node in the project. Writes a markdown file and updates the SQLite index. ' +
       'Returns { id, file_path }. Call get_node(id) to retrieve the full record.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        name: { type: 'string', description: 'Display name (max 200 chars, required)' },
+        name: { type: 'string', description: 'Node name (max 200 chars, required)' },
+        display_name: {
+          type: 'string',
+          description: 'Optional title shown on the graph in place of the name, e.g. to split "Name (qualifier)" over two lines',
+        },
         entity_type: { type: 'string', description: 'Entity type key (default "unclassified")' },
         status: { type: 'string', enum: ['active', 'archived'], description: 'Node status (default "active")' },
         properties: {
@@ -456,7 +588,7 @@ const TOOLS = [
             properties: {
               target:    { type: 'string', description: 'Target node UUID' },
               rel_type:  { type: 'string', description: 'Connector type key' },
-              direction: { type: 'string', enum: ['none', 'incoming', 'outgoing'] },
+              direction: { type: 'string', enum: ['none', 'outgoing', 'incoming', 'bidirectional'] },
               label:     { type: 'string' },
               influence: { type: 'string', enum: ['normal', 'weak', 'none'] },
               properties: { type: 'object', additionalProperties: { type: 'string' } },
@@ -465,13 +597,14 @@ const TOOLS = [
           },
         },
         notes:  { type: 'string', description: 'Markdown body text' },
-        folder: { type: 'string', description: 'Subfolder path relative to vault root' },
+        folder: { type: 'string', description: 'Subfolder path relative to the project folder' },
       },
       required: ['name'],
     },
   },
   {
     name: 'update_node',
+    annotations: { title: 'Update node', ...REPLACES_OR_DELETES },
     description:
       'Update an existing node. Only supplied fields are changed; omitted fields retain their current values. ' +
       'Providing relationships or properties replaces the entire array/map. ' +
@@ -480,7 +613,7 @@ const TOOLS = [
       type: 'object' as const,
       properties: {
         id:          { type: 'string', description: 'UUID of the node to update' },
-        name:        { type: 'string', description: 'New display name (max 200 chars)' },
+        name:        { type: 'string', description: 'New node name (max 200 chars)' },
         entity_type: { type: 'string' },
         status:      { type: 'string', enum: ['active', 'archived'] },
         properties:  { type: 'object', additionalProperties: { type: 'string' } },
@@ -491,7 +624,7 @@ const TOOLS = [
             properties: {
               target:    { type: 'string' },
               rel_type:  { type: 'string' },
-              direction: { type: 'string', enum: ['none', 'incoming', 'outgoing'] },
+              direction: { type: 'string', enum: ['none', 'outgoing', 'incoming', 'bidirectional'] },
               label:     { type: 'string' },
               influence: { type: 'string', enum: ['normal', 'weak', 'none'] },
               properties: { type: 'object', additionalProperties: { type: 'string' } },
@@ -500,15 +633,16 @@ const TOOLS = [
           },
         },
         notes:        { type: 'string', description: 'Replaces the full markdown body if provided' },
-        display_name: { type: 'string', description: 'Pass empty string to clear' },
+        display_name: { type: 'string', description: 'Title shown on the graph in place of the name. Pass empty string to clear' },
       },
       required: ['id'],
     },
   },
   {
     name: 'delete_node',
+    annotations: { title: 'Delete node', ...REPLACES_OR_DELETES },
     description:
-      'Delete a node from the vault. Removes the markdown file and all references ' +
+      'Delete a node from the project. Removes the markdown file and all references ' +
       'from the SQLite index (entities, FTS, relationships). Returns { deleted: true, file_path }.',
     inputSchema: {
       type: 'object' as const,
@@ -520,6 +654,7 @@ const TOOLS = [
   },
   {
     name: 'create_edge',
+    annotations: { title: 'Create edge', ...WRITES },
     description:
       'Add a relationship from one node to another. Reads the source node file, appends the ' +
       'relationship, writes it back, and updates the SQLite index. ' +
@@ -556,8 +691,9 @@ const TOOLS = [
   },
   {
     name: 'delete_edge',
+    annotations: { title: 'Delete edge', ...REPLACES_OR_DELETES },
     description:
-      'Remove a relationship from the vault. Reads the source node file, strips the matching ' +
+      'Remove a relationship from the project. Reads the source node file, strips the matching ' +
       'relationship, writes it back, and updates the SQLite index. ' +
       'Returns { deleted: true, edge_id }.',
     inputSchema: {
@@ -572,6 +708,7 @@ const TOOLS = [
   },
   {
     name: 'read_skill_guide',
+    annotations: { title: 'Read skill guide', ...READ_ONLY },
     description:
       'Read the full Filamental skill guide: how to design a space, choose entity ' +
       'and connector vocabularies, set colours, arrow directions and physics weights, ' +
@@ -582,15 +719,17 @@ const TOOLS = [
   },
   {
     name: 'read_format_reference',
+    annotations: { title: 'Read format reference', ...READ_ONLY },
     description:
       'Read the exact on-disk file format: the YAML frontmatter fields of a node ' +
       'markdown file, how relationships are stored, and what the .filamental folder ' +
-      'holds. Needed only when reading or writing vault files directly rather than ' +
+      'holds. Needed only when reading or writing project files directly rather than ' +
       'through these tools.',
     inputSchema: { type: 'object' as const, properties: {} },
   },
   {
     name: 'extract_section',
+    annotations: { title: 'Extract section', ...WRITES },
     description:
       'Move a heading\'s section out of a node into a new node of its own. ' +
       'The heading stays behind with a [[wikilink]] where the content was, and a ' +
@@ -611,7 +750,7 @@ const TOOLS = [
           description: 'Name for the new node (default: the heading text)',
         },
         entity_type: { type: 'string', description: 'Entity type for the new node' },
-        folder:      { type: 'string', description: 'Vault-relative folder for the new file' },
+        folder:      { type: 'string', description: 'Folder for the new file, relative to the project folder' },
         rel_type:    { type: 'string', description: 'Connector type (default "includes")' },
         direction: {
           type: 'string',
@@ -628,6 +767,7 @@ const TOOLS = [
   },
   {
     name: 'inline_section',
+    annotations: { title: 'Inline section', ...WRITES, destructiveHint: true },
     description:
       'Fold a node\'s content back into another node: the inverse of extract_section. ' +
       'The content lands where the [[wikilink]] to it already sits, or is appended ' +
@@ -942,6 +1082,22 @@ function parseDirection(raw: unknown): string {
   return value
 }
 
+/** The relationships array create_node and update_node take, held to the same directions as create_edge. */
+function parseRelationships(raw: unknown[]): RelationshipRecord[] {
+  return raw.map(r => {
+    const rel = r as Record<string, unknown>
+    const out: RelationshipRecord = {
+      target: String(rel['target'] ?? ''),
+      rel_type: String(rel['rel_type'] ?? ''),
+      direction: parseDirection(rel['direction']),
+      properties: (rel['properties'] as Record<string, string>) ?? {},
+    }
+    if (rel['label'] != null) out.label = String(rel['label'])
+    if (rel['influence'] != null) out.influence = String(rel['influence'])
+    return out
+  })
+}
+
 /**
  * How an edge's arrow reads from `nodeId`'s end.
  *
@@ -1087,6 +1243,149 @@ function toolGetSubgraph(
   }))
 
   return { nodes, edges }
+}
+
+const ARROW_GLYPH: Record<string, string> = {
+  outgoing: '→', incoming: '←', bidirectional: '↔', none: '—',
+}
+
+/**
+ * The shortest chain of connectors between two nodes.
+ *
+ * Nodes are found by UUID or by exact name; a name that matches several nodes
+ * hands the candidates back rather than guessing. Each hop is stated from the end
+ * the route arrives at, so `direction` reads the way the arrow looks on screen.
+ */
+export function toolFindPath(
+  db: Database.Database,
+  args: Record<string, unknown>,
+): unknown {
+  const directionArg = String(args.direction ?? 'any')
+  if (directionArg !== 'any' && directionArg !== 'follow') {
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      `Invalid direction "${directionArg}". Expected one of: any, follow.`,
+    )
+  }
+  const format = String(args.format ?? 'json')
+  if (format !== 'json' && format !== 'markdown') {
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      `Invalid format "${format}". Expected one of: json, markdown.`,
+    )
+  }
+  const maxHops = Math.min(
+    typeof args.max_hops === 'number' ? Math.max(1, Math.floor(args.max_hops)) : 6,
+    12,
+  )
+
+  const entities = (db
+    .prepare('SELECT id, name, entity_type FROM entities')
+    .all() as Row[]).map(r => ({
+      id: str(r['id']), name: str(r['name']), type: str(r['entity_type']),
+    }))
+  const byId = new Map(entities.map(e => [e.id, e]))
+
+  /** A UUID wins over a name. More than one match means the name is ambiguous. */
+  function resolve(which: 'from' | 'to') {
+    const ref = String(args[which] ?? '')
+    const byUuid = byId.get(ref)
+    if (byUuid) return [byUuid]
+    const wanted = ref.trim().toLowerCase()
+    const matches = wanted ? entities.filter(e => e.name.trim().toLowerCase() === wanted) : []
+    if (matches.length === 0) {
+      throw new McpError(ErrorCode.InvalidParams, `Node not found: ${ref}`)
+    }
+    return matches
+  }
+
+  const starts = resolve('from')
+  const ends = resolve('to')
+  for (const [which, matches] of [['from', starts], ['to', ends]] as const) {
+    if (matches.length > 1) {
+      return {
+        found: false,
+        ambiguous: which,
+        candidates: matches,
+        message:
+          `"${String(args[which])}" matches ${matches.length} nodes. ` +
+          `Call find_path again with the UUID of the one you mean.`,
+      }
+    }
+  }
+  const [a] = starts
+  const [b] = ends
+
+  const rows = db.prepare(
+    `SELECT r.edge_id, r.source_id, r.target_id, r.rel_type, r.direction, r.label
+     FROM relationships r
+     JOIN entities se ON se.id = r.source_id
+     JOIN entities te ON te.id = r.target_id
+     ORDER BY r.edge_id`,
+  ).all() as Row[]
+
+  const edgeById = new Map<string, Row>()
+  const adj: Adjacency = new Map()
+  const add = (from: string, to: string, edgeId: string) => {
+    const list = adj.get(from)
+    if (list) list.push({ to, edgeId })
+    else adj.set(from, [{ to, edgeId }])
+  }
+  for (const row of rows) {
+    const edgeId = str(row['edge_id'])
+    const src = str(row['source_id'])
+    const tgt = str(row['target_id'])
+    edgeById.set(edgeId, row)
+    // Crossing from one end, an arrow that points back at that end is a one-way
+    // street the wrong way; every other arrow can be crossed.
+    const canCross = (from: string) =>
+      directionArg === 'any' || effectiveDirection(str(row['direction']), src, from) !== 'incoming'
+    if (canCross(src)) add(src, tgt, edgeId)
+    if (canCross(tgt)) add(tgt, src, edgeId)
+  }
+
+  const route = shortestPath(adj, a.id, b.id, maxHops)
+  if (!route) {
+    return {
+      found: false,
+      from: { id: a.id, name: a.name },
+      to:   { id: b.id, name: b.name },
+      message:
+        `No route from ${a.name} to ${b.name} within ${maxHops} hops` +
+        (directionArg === 'follow' ? ' following the arrows. Try direction "any".' : '.'),
+    }
+  }
+
+  const hops = route.edgeIds.map((edgeId, i) => {
+    const row = edgeById.get(edgeId)!
+    const fromId = route.nodeIds[i]
+    const toId = route.nodeIds[i + 1]
+    return {
+      from:           { id: fromId, name: byId.get(fromId)!.name },
+      connector_type: str(row['rel_type']),
+      label:          row['label'] != null ? str(row['label']) : null,
+      direction:      effectiveDirection(str(row['direction']), str(row['source_id']), fromId),
+      to:             { id: toId, name: byId.get(toId)!.name },
+    }
+  })
+
+  if (format === 'markdown') {
+    const lines = hops.map((h, i) =>
+      `${i + 1}. ${h.from.name} ${ARROW_GLYPH[h.direction] ?? '—'} ${h.to.name}` +
+      ` (${h.connector_type}${h.label ? `: ${h.label}` : ''})`)
+    const heading = hops.length === 0
+      ? `${a.name} is ${b.name}.`
+      : `${hops.length} hop${hops.length === 1 ? '' : 's'} from ${a.name} to ${b.name}:`
+    return { found: true, hops: hops.length, markdown: [heading, ...lines].join('\n') }
+  }
+
+  return {
+    found: true,
+    hops: hops.length,
+    from: { id: a.id, name: a.name },
+    to:   { id: b.id, name: b.name },
+    path: hops,
+  }
 }
 
 /** One node as it appears in an assembled context document. */
@@ -1316,6 +1615,46 @@ function toolListConnectorTypes(vaultPath: string): unknown {
   }
 }
 
+/**
+ * The Structure section of an Export for AI file, over the index. The same
+ * function the app runs (structureReport.generated.ts), so the two cannot
+ * disagree about what "load-bearing" means. Note bodies come from the search
+ * index, which holds them, rather than from reading every file.
+ */
+export function toolGetStructureReport(db: Database.Database, vaultPath: string): unknown {
+  const nodes = (db.prepare(
+    `SELECT e.id, e.name, e.entity_type, e.data_json, f.body
+     FROM entities e LEFT JOIN entities_fts f ON f.entity_id = e.id
+     ORDER BY e.id`,
+  ).all() as Row[]).map(r => {
+    const data = JSON.parse(str(r['data_json']) || '{}') as { properties?: Record<string, string> }
+    return {
+      id:         str(r['id']),
+      name:       str(r['name']),
+      type:       str(r['entity_type']),
+      body:       r['body'] != null ? str(r['body']) : '',
+      properties: data.properties ?? {},
+    }
+  })
+  const edges = (db.prepare(
+    'SELECT source_id, target_id, rel_type FROM relationships ORDER BY edge_id',
+  ).all() as Row[]).map(r => ({
+    source_id: str(r['source_id']), target_id: str(r['target_id']), rel_type: str(r['rel_type']),
+  }))
+
+  const markdown = buildStructureSection({
+    nodes,
+    edges,
+    entity_types:    toolListNodeTypes(vaultPath),
+    connector_types: toolListConnectorTypes(vaultPath),
+  })
+  return {
+    node_count: nodes.length,
+    edge_count: edges.length,
+    markdown:   markdown || 'This space has no nodes yet.',
+  }
+}
+
 function toolGetVaultInfo(db: Database.Database, vaultPath: string): unknown {
   const nodeRow = db
     .prepare('SELECT COUNT(*) AS node_count FROM entities')
@@ -1350,31 +1689,21 @@ function toolGetVaultInfo(db: Database.Database, vaultPath: string): unknown {
 
 // ── Write tool implementations ────────────────────────────────────────────────
 
-function toolCreateNode(
+export function toolCreateNode(
   db: Database.Database,
   vaultPath: string,
   args: Record<string, unknown>,
 ): unknown {
   const name = validateName(args.name)
+  // The free plan's node cap, as the app applies it (see freeCap.ts).
+  if (freeCapReached(db, vaultPath)) throw new McpError(ErrorCode.InvalidRequest, NODE_LIMIT_MESSAGE)
   const entityType = typeof args.entity_type === 'string' ? args.entity_type : 'unclassified'
   const status = args.status === 'archived' ? 'archived' : 'active'
   const properties = (args.properties as Record<string, string>) ?? {}
   const notes = typeof args.notes === 'string' ? args.notes : ''
   const folder = typeof args.folder === 'string' ? args.folder : ''
 
-  const rawRels = (args.relationships as unknown[]) ?? []
-  const relationships: RelationshipRecord[] = rawRels.map(r => {
-    const rel = r as Record<string, unknown>
-    const out: RelationshipRecord = {
-      target: String(rel['target'] ?? ''),
-      rel_type: String(rel['rel_type'] ?? ''),
-      direction: String(rel['direction'] ?? 'none'),
-      properties: (rel['properties'] as Record<string, string>) ?? {},
-    }
-    if (rel['label'] != null) out.label = String(rel['label'])
-    if (rel['influence'] != null) out.influence = String(rel['influence'])
-    return out
-  })
+  const relationships = parseRelationships((args.relationships as unknown[]) ?? [])
 
   const id = randomUUID()
   const now = new Date().toISOString()
@@ -1395,6 +1724,7 @@ function toolCreateNode(
     child_view_id: null,
     has_notes: notes.trim().length > 0,
   }
+  if (typeof args.display_name === 'string' && args.display_name !== '') node.display_name = args.display_name
 
   const safeFilename = sanitiseFilename(name)
   const resolvedVault = resolve(vaultPath)
@@ -1402,7 +1732,7 @@ function toolCreateNode(
 
   if (folder) {
     if (folderPath !== resolvedVault && !folderPath.startsWith(resolvedVault + sep)) {
-      throw new McpError(ErrorCode.InvalidParams, 'folder must not escape the vault root')
+      throw new McpError(ErrorCode.InvalidParams, 'folder must stay inside the project folder')
     }
   }
 
@@ -1419,7 +1749,7 @@ function toolCreateNode(
   return { id, file_path: filePath }
 }
 
-function toolUpdateNode(
+export function toolUpdateNode(
   db: Database.Database,
   vaultPath: string,
   args: Record<string, unknown>,
@@ -1472,18 +1802,7 @@ function toolUpdateNode(
     existingNode.properties = args.properties as Record<string, string>
   }
   if (Array.isArray(args.relationships)) {
-    existingNode.relationships = (args.relationships as unknown[]).map(r => {
-      const rel = r as Record<string, unknown>
-      const out: RelationshipRecord = {
-        target: String(rel['target'] ?? ''),
-        rel_type: String(rel['rel_type'] ?? ''),
-        direction: String(rel['direction'] ?? 'none'),
-        properties: (rel['properties'] as Record<string, string>) ?? {},
-      }
-      if (rel['label'] != null) out.label = String(rel['label'])
-      if (rel['influence'] != null) out.influence = String(rel['influence'])
-      return out
-    })
+    existingNode.relationships = parseRelationships(args.relationships as unknown[])
   }
   if (typeof args.notes === 'string') {
     existingBody = args.notes
@@ -1511,8 +1830,7 @@ function toolUpdateNode(
 
   existingNode.has_notes = existingBody.trim().length > 0
 
-  const markdown = serialiseMarkdown(existingNode, existingBody)
-  writeFileSync(filePath, markdown, 'utf-8')
+  writeNodeFile(filePath, existingNode, existingBody)
 
   upsertEntity(db, existingNode, filePath, existingBody)
 
@@ -1599,7 +1917,7 @@ function toolCreateEdge(
   node.modified_by = 'filamental-mcp'
   node.version    += 1
 
-  writeFileSync(filePath, serialiseMarkdown(node, body), 'utf-8')
+  writeNodeFile(filePath, node, body)
   upsertEntity(db, node, filePath, body)
 
   return { edge_id: edgeId, source_id: sourceId, target_id: targetId }
@@ -1652,7 +1970,7 @@ function toolDeleteEdge(
   node.modified_by = 'filamental-mcp'
   node.version    += 1
 
-  writeFileSync(filePath, serialiseMarkdown(node, body), 'utf-8')
+  writeNodeFile(filePath, node, body)
   upsertEntity(db, node, filePath, body)
 
   return { deleted: true, edge_id: edgeId }
@@ -1768,7 +2086,7 @@ function writeNode(
   node.modified_by = 'filamental-mcp'
   node.version += 1
   node.has_notes = body.trim().length > 0
-  writeFileSync(filePath, serialiseMarkdown(node, body), 'utf-8')
+  writeNodeFile(filePath, node, body)
   upsertEntity(db, node, filePath, body)
 }
 
@@ -1989,7 +2307,7 @@ export function createServer(
   getSchemaHint: () => string | null,
 ): Server {
   const server = new Server(
-    { name: 'filamental', version: '0.2.9' },
+    { name: 'filamental', version: '0.2.16' },
     // `instructions` is delivered in the initialize response and surfaced to the
     // model by the client, so the user does not have to install anything for the
     // assistant to know how a Filamental space works.
@@ -2013,10 +2331,13 @@ export function createServer(
         case 'get_node':             result = toolGetNode(db, a);                        break
         case 'get_connections':      result = toolGetConnections(db, a);                 break
         case 'get_subgraph':         result = toolGetSubgraph(db, a);                    break
+        case 'find_path':            result = toolFindPath(db, a);                       break
+        case 'get_structure_report': result = toolGetStructureReport(db, vaultPath);     break
         case 'get_context':          result = toolGetContext(db, a);                     break
         case 'list_node_types':      result = toolListNodeTypes(vaultPath);              break
         case 'list_connector_types': result = toolListConnectorTypes(vaultPath);         break
-        case 'get_vault_info':       result = toolGetVaultInfo(db, vaultPath);           break
+        case 'get_project_info':
+        case 'get_vault_info':       result = toolGetVaultInfo(db, vaultPath);           break // its name before 0.2.16
         case 'create_node':          result = toolCreateNode(db, vaultPath, a);          break
         case 'update_node':          result = toolUpdateNode(db, vaultPath, a);          break
         case 'delete_node':          result = toolDeleteNode(db, a);                     break
