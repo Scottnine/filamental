@@ -1,4 +1,4 @@
-# Filamental for Claude
+# 3D Filamental.space
 
 Filamental is a spatial app for systems and visual thinkers. 2D & 3D work for almost any role or task. Create connected networks, networked documents, documented knowledge.
 
