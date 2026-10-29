@@ -76,7 +76,7 @@ changes or deletes content. Each one is described in the
 
 ## What it runs, reads and writes
 
-The plugin runs one command, `npx -y filamental-mcp@0.2.16`. The first time it
+The plugin runs one command, `npx -y filamental-mcp@0.2.17`. The first time it
 runs, npx downloads that exact version of the
 [`filamental-mcp`](https://www.npmjs.com/package/filamental-mcp) package and its
 dependencies from the public npm registry. Its source is in the

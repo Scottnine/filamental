@@ -1,6 +1,6 @@
 {
   "name": "filamental-mcp",
-  "version": "0.2.16",
+  "version": "0.2.17",
   "mcpName": "io.github.Scottnine/filamental",
   "description": "MCP server for Filamental: lets Claude and other AI apps search, read and build your knowledge graph",
   "type": "module",
