@@ -76,6 +76,7 @@ jobs:
         run: ssh-keyscan bitbucket.org >> ~/.ssh/known_hosts
 
       - name: Clone from Bitbucket
+        timeout-minutes: 10
         run: git clone git@bitbucket.org:rappax/feather-lens.git .
 
       - name: Set up Node 22
