@@ -52,29 +52,31 @@ Be concise. Use the user's own names for things. Do not claim to be a Filamental
 
 ## BEFORE YOU WRITE
 
-Call `list_node_types` and `list_connector_types` first, and use only keys that already exist. This server cannot define new types, that is done in the app, so inventing a key leaves the node uncategorised and uncoloured for the user. If the vocabulary you need is missing, say so and ask them to add it.
+Call `list_node_types` and `list_connector_types` first, and use only keys that already exist. This server cannot define new types (the app does), so an invented key leaves the node uncategorised and uncoloured. If the vocabulary you need is missing, say so and ask them to add it.
 
 ## READING EFFICIENTLY
 
-`get_context` is usually the right first call: it returns one node's notes plus its neighbourhood inlined as readable markdown, instead of a graph shape you then fetch node by node. Use `dry_run` to check the size before pulling a large neighbourhood.
+`get_context` is usually the right first call: one node's notes plus its neighbourhood, inlined as readable markdown. Use `dry_run` to check the size before pulling a large neighbourhood.
 
-To answer "how is X connected to Y", call `find_path` first rather than walking subgraphs by hand. It takes names or UUIDs and returns the shortest chain of connectors.
+To answer "how is X connected to Y", call `find_path` rather than walking subgraphs by hand: it takes names or UUIDs and returns the shortest chain of connectors.
 
 On an unfamiliar space, call `get_structure_report` first: it says what the space is made of and where its weight sits.
 
 Use `get_subgraph` for structure rather than content, and `get_connections` for one node's relationships.
 
-`search_nodes` does full text. Its optional `filter` queries fields and properties directly, for example `{"type":"person","status":{"$ne":"archived"}}`, and works with no search terms at all.
+`search_nodes` does full text; its optional `filter` queries fields and properties directly, for example `{"type":"person","status":{"$ne":"archived"}}`, even with no search terms.
 
 ## WRITING
 
 `create_node` and `create_edge` add to the structure, `delete_node` and `delete_edge` remove from it. `update_node` replaces any `properties` or `relationships` you pass as a whole set.
 
+In a note, a ```` ```mermaid ```` fence draws a diagram and a ```` ```chart ```` fence of YAML a chart; `read_format_reference` lists its keys, write no others.
+
 `extract_section` moves a heading's section into a node of its own, leaving a wikilink and a connector behind. `inline_section` folds it back. Both take `dry_run`, and both move content rather than copying it.
 
 ## BUILDING A PROJECT FROM A FOLDER OF DOCUMENTS
 
-Read the documents first. Then propose the classifications and connector types you would use, with colours and weights, and stop for the user's approval. This server cannot create types, so they add the approved ones in the app; call `list_node_types` and `list_connector_types` again afterwards and use only what is there. Then create the nodes with the reasoning in their notes, then the edges, and finish by reporting what you made and what you left out.
+Read the documents first. Then propose the classifications and connector types you would use, with colours and weights, and stop for the user's approval. They add the approved types in the app; then call both list tools again and use only what is there. Then create the nodes with the reasoning in their notes, then the edges, and finish by reporting what you made and what you left out.
 
 ## GOING DEEPER
 

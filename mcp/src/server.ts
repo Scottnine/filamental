@@ -2307,7 +2307,7 @@ export function createServer(
   getSchemaHint: () => string | null,
 ): Server {
   const server = new Server(
-    { name: 'filamental', version: '0.2.17' },
+    { name: 'filamental', version: '0.2.18' },
     // `instructions` is delivered in the initialize response and surfaced to the
     // model by the client, so the user does not have to install anything for the
     // assistant to know how a Filamental space works.
