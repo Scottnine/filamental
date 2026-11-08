@@ -426,6 +426,73 @@ properties:
 
 ---
 
+## Diagrams and Charts in a Page Body
+
+Two kinds of fenced code block are drawn as pictures, anywhere in the body below the
+frontmatter: a `mermaid` fence is a diagram and a `chart` fence is a chart. Filamental draws
+them on the page, and in shared links, HTML downloads and PDF exports. The text in the file
+is the picture: nothing about it is stored anywhere else. People edit them in the app's own
+panels and never see the text, so the fence is the only way an AI writes one.
+
+### Diagrams
+
+````markdown
+```mermaid
+flowchart LR
+  A[Idea] --> B[Plan]
+  B --> C[Build]
+```
+````
+
+- Write Mermaid 11 syntax.
+- In shared links, HTML downloads and PDF exports, text Mermaid can't draw goes out as
+  plain code rather than being dropped.
+
+### Charts
+
+A chart is a bar or line chart of the numbers in the fence, written as YAML:
+
+````markdown
+```chart
+type: bar
+title: Sales by quarter
+x: [Q1, Q2, Q3]
+x_title: Quarter
+y_title: Units
+y2_title: Margin (%)
+series:
+  - name: North
+    values: [12, 15, 9]
+  - name: South
+    values: [8, 11, 14]
+  - name: Margin
+    values: [30, 28, 35]
+    axis: right
+```
+````
+
+| Key | What it holds |
+|---|---|
+| `type` | `bar` or `line`. Anything else is read as `bar` |
+| `title` | The chart's title |
+| `x` | The categories along the bottom, in order |
+| `series` | One entry per series: `name`, and `values` with one number per category, in the same order as `x` |
+| `axis` | On a series, `right` draws it against a second axis on the right, for numbers on a different scale. Leave it out for the left axis |
+| `x_title`, `y_title`, `y2_title` | Optional titles for the bottom, left and right axes. `y2_title` shows only when a series uses the right axis |
+| `legend` | `true` or `false`. Leave it out and the legend shows when there are two or more series |
+| `labels` | `true` puts the number on every bar or point. Off by default |
+
+- Only these keys are read. Colours, size and layout come from the page style, so don't
+  add any.
+- Write a blank value as `null`. A value that isn't a number, a formula among them, is
+  read as blank.
+- A chart is simple on purpose: one set of categories, bars or lines, two axes at most.
+  For anything more, put the numbers in a table.
+
+Every other fenced code block is left as code.
+
+---
+
 ## Integrity Checklist
 
 Run through this before finalising any batch of nodes. Do not skip it, broken UUIDs and
