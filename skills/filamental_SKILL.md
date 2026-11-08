@@ -526,6 +526,8 @@ The rules that matter most, always:
 - `type` values must exactly match **keys** in this project's `entity_types.json`: never labels
 - Relationship `type` values must exactly match **keys** in `connector_types.json`: never labels
 - Never guess at type keys, check the vocabulary you read at session start
+- A diagram or chart in a node's notes is a fenced block, `mermaid` or `chart`. The format
+  reference gives the syntax; write only the keys it lists
 
 ---
 
