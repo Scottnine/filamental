@@ -1,0 +1,45 @@
+name: Apple agreement check
+
+# Apple reissues its developer agreements from time to time and sends no
+# reminder. Until the new one is accepted, notarization refuses every request
+# with HTTP 403 ("A required agreement is missing or has expired"), so the
+# first sign used to be a Mac release failing at notarize after a full build.
+#
+# This asks the notary service for its submission history with the same API
+# key mac-release.yml notarizes with. It uploads nothing. If Apple is waiting
+# on a signature the run fails, and GitHub emails the failure, days before a
+# release would have found it. Fix: accept the agreement at
+# developer.apple.com, then re-run this to confirm.
+on:
+  schedule:
+    - cron: '0 6 * * 1'   # Mondays 06:00 UTC
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: macos-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ask the notary service for its history
+        env:
+          APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          set -uo pipefail
+          KEY="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
+          echo "$APPLE_API_KEY_CONTENT" > "$KEY"
+
+          OUT=$(xcrun notarytool history \
+                  --key "$KEY" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER" 2>&1)
+          STATUS=$?
+          rm -f "$KEY"
+
+          if [ $STATUS -ne 0 ] || echo "$OUT" | grep -qi "agreement"; then
+            echo "$OUT" | tail -5
+            echo ""
+            echo "FAIL: Apple's notary service refused the request. If it names an"
+            echo "      agreement, accept it at developer.apple.com before the next release."
+            exit 1
+          fi
+          echo "PASS: notarization is open. No agreement is waiting."
