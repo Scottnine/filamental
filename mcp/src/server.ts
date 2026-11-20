@@ -608,6 +608,7 @@ export const TOOLS = [
     description:
       'Update an existing node. Only supplied fields are changed; omitted fields retain their current values. ' +
       'Providing relationships or properties replaces the entire array/map. ' +
+      'To rename a nebula use rename_nebula, never this tool on one member. ' +
       'Returns { id, file_path }.',
     inputSchema: {
       type: 'object' as const,
@@ -636,6 +637,24 @@ export const TOOLS = [
         display_name: { type: 'string', description: 'Title shown on the graph in place of the name. Pass empty string to clear' },
       },
       required: ['id'],
+    },
+  },
+  {
+    name: 'rename_nebula',
+    annotations: { title: 'Rename nebula', ...REPLACES_OR_DELETES },
+    description:
+      'Rename a nebula on every one of its members, so its name never differs between them. ' +
+      'A nebula is a group of nodes held in each member\'s "nebula" property. Always rename one ' +
+      'with this tool: update_node on a single member would split the nebula in two. ' +
+      'Renaming onto a nebula that already exists joins the two. ' +
+      'Returns { from, to, members }.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        from: { type: 'string', description: 'The nebula\'s current name' },
+        to:   { type: 'string', description: 'The new name (commas are dropped: they separate names)' },
+      },
+      required: ['from', 'to'],
     },
   },
   {
@@ -1837,6 +1856,56 @@ export function toolUpdateNode(
   return { id, file_path: filePath }
 }
 
+/**
+ * The property that holds a node's nebula names, comma-separated. Mirrors
+ * NEBULA_KEY and the list rules in the app's src/utils/nodeNebula.ts.
+ */
+const NEBULA_KEY = 'nebula'
+
+function nebulaNames(raw: string | undefined): string[] {
+  const out: string[] = []
+  for (const part of (raw ?? '').split(',')) {
+    const name = part.trim()
+    if (name && !out.includes(name)) out.push(name)
+  }
+  return out
+}
+
+const cleanNebulaName = (v: unknown) => str(v).replace(/,/g, ' ').replace(/\s+/g, ' ').trim()
+
+export function toolRenameNebula(
+  db: Database.Database,
+  vaultPath: string,
+  args: Record<string, unknown>,
+): unknown {
+  const from = cleanNebulaName(args.from)
+  const to   = cleanNebulaName(args.to)
+  if (!from || !to) throw new McpError(ErrorCode.InvalidParams, 'from and to are both required')
+
+  const rows = db.prepare('SELECT id, file_path, data_json FROM entities').all() as Row[]
+  const members: string[] = []
+  for (const row of rows) {
+    // The file is the truth; the index only finds the candidates.
+    let properties: Record<string, string>
+    try {
+      properties = parseMarkdownFile(str(row['file_path'])).node.properties ?? {}
+    } catch {
+      try { properties = (JSON.parse(str(row['data_json'])).properties ?? {}) as Record<string, string> }
+      catch { continue }
+    }
+    const names = nebulaNames(properties[NEBULA_KEY])
+    if (!names.includes(from)) continue
+    members.push(str(row['id']))
+    if (from === to) continue
+    const next = [...new Set(names.map((n) => (n === from ? to : n)))]
+    toolUpdateNode(db, vaultPath, { id: str(row['id']), properties: { ...properties, [NEBULA_KEY]: next.join(', ') } })
+  }
+  if (members.length === 0) {
+    throw new McpError(ErrorCode.InvalidParams, `No node is in a nebula called "${from}"`)
+  }
+  return { from, to, members }
+}
+
 function toolDeleteNode(
   db: Database.Database,
   args: Record<string, unknown>,
@@ -2307,7 +2376,7 @@ export function createServer(
   getSchemaHint: () => string | null,
 ): Server {
   const server = new Server(
-    { name: 'filamental', version: '0.2.18' },
+    { name: 'filamental', version: '0.2.19' },
     // `instructions` is delivered in the initialize response and surfaced to the
     // model by the client, so the user does not have to install anything for the
     // assistant to know how a Filamental space works.
@@ -2340,6 +2409,7 @@ export function createServer(
         case 'get_vault_info':       result = toolGetVaultInfo(db, vaultPath);           break // its name before 0.2.16
         case 'create_node':          result = toolCreateNode(db, vaultPath, a);          break
         case 'update_node':          result = toolUpdateNode(db, vaultPath, a);          break
+        case 'rename_nebula':        result = toolRenameNebula(db, vaultPath, a);        break
         case 'delete_node':          result = toolDeleteNode(db, a);                     break
         case 'create_edge':          result = toolCreateEdge(db, a);                     break
         case 'delete_edge':          result = toolDeleteEdge(db, a);                     break

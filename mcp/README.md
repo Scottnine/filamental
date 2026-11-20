@@ -66,6 +66,7 @@ when you open another, with no restart. To pin it to one project instead, add
 |---|---|
 | `create_node` | Create a node: writes its markdown file and updates the index |
 | `update_node` | Change a node. Omitted fields stay as they are; a `properties` or `relationships` you pass replaces the whole set |
+| `rename_nebula` | Rename a nebula on every one of its members at once, so the name never differs between them |
 | `delete_node` | Delete a node and its file |
 | `create_edge` | Connect two nodes |
 | `delete_edge` | Remove a connector |

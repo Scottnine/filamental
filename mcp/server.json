@@ -7,12 +7,12 @@
     "source": "github",
     "subfolder": "mcp"
   },
-  "version": "0.2.18",
+  "version": "0.2.19",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "filamental-mcp",
-      "version": "0.2.18",
+      "version": "0.2.19",
       "transport": {
         "type": "stdio"
       }
