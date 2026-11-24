@@ -45,24 +45,32 @@ the relationships your material actually states.
 - **Filamental**, installed, with a space open. It's a free download at
   [filamental.space/download](https://filamental.space/download), with no
   account and no form.
-- **Node.js 22 or later**, since the plugin starts the Filamental MCP server
-  with `npx`.
+- **The Filamental MCP server, connected.** In Filamental, open Settings › AI ›
+  Connect an AI app: Claude Desktop connects in one click, and Claude Code gets
+  a ready-made block to add. The server needs Node.js 22 or later. Full steps
+  are at [filamental.space/help/connect-an-ai-app](https://filamental.space/help/connect-an-ai-app).
+
+In Claude Code you can install the skill and the server together instead:
+
+```
+/plugin marketplace add Scottnine/filamental
+/plugin install filamental@filamental
+```
 
 ## Where it works
 
-| Surface | What loads |
+| Surface | What works |
 | --- | --- |
-| Claude Code | The skill and the MCP server |
-| Cowork, running on your computer | The skill and the MCP server |
-| Claude chat | The skill only. Chat doesn't start servers on your computer, so the tools aren't there |
+| Claude Code | The skill, and the tools once the server is connected |
+| Cowork, running on your computer | The skill, and the tools once the server is connected |
+| Claude chat | The skill only. Chat doesn't reach servers on your computer, so the tools aren't there |
 
 ## What's in the plugin
 
 | File | Purpose |
 | --- | --- |
 | `.claude-plugin/plugin.json` | The manifest |
-| `.mcp.json` | Starts the Filamental MCP server over stdio |
-| `skills/filamental/SKILL.md` | How Claude should read and build a Filamental structure |
+| `skills/filamental/SKILL.md` | How Claude should read and build a Filamental structure, and how to connect the server if it isn't there yet |
 
 ## The tools
 
@@ -76,14 +84,14 @@ changes or deletes content. Each one is described in the
 
 ## What it runs, reads and writes
 
-The plugin runs one command, `npx -y filamental-mcp@0.2.19`. The first time it
-runs, npx downloads that exact version of the
-[`filamental-mcp`](https://www.npmjs.com/package/filamental-mcp) package and its
-dependencies from the public npm registry. Its source is in the
+The plugin runs nothing itself: it's a skill. The tools come from the
+Filamental MCP server you connect, the
+[`filamental-mcp`](https://www.npmjs.com/package/filamental-mcp) package on
+npm, whose source is in the
 [`mcp/`](https://github.com/Scottnine/filamental/tree/main/mcp) folder of this
 repository.
 
-From then on the server works entirely on your computer:
+The server works entirely on your computer:
 
 - It reads Filamental's settings folder, to find the space you have open and
   the reference guides Filamental installs.

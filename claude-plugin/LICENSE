@@ -1,4 +1,4 @@
-Applies to this Claude plugin and the Filamental MCP server it starts (npm: filamental-mcp) only.
+Applies to this Claude plugin (a skill) only.
 It does not apply to the Filamental desktop application, which is proprietary.
 See https://filamental.space/terms.
 

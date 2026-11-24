@@ -1,0 +1,19 @@
+{
+  "name": "filamental",
+  "owner": {
+    "name": "Filamental",
+    "email": "cosimo@filamental.space"
+  },
+  "metadata": {
+    "description": "Filamental for Claude Code: the MCP server and the skill, in one plugin."
+  },
+  "plugins": [
+    {
+      "name": "filamental",
+      "source": "./claude-plugin-local",
+      "description": "Search, read and build your Filamental project from Claude Code: the Filamental MCP server and the skill that shows Claude how to work with a Filamental structure.",
+      "homepage": "https://filamental.space",
+      "license": "MIT"
+    }
+  ]
+}

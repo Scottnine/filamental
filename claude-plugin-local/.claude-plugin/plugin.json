@@ -1,0 +1,20 @@
+{
+  "name": "filamental",
+  "version": "1.1.0",
+  "description": "Search, read and build your Filamental project from Claude Code: the Filamental MCP server and the skill that shows Claude how to work with a Filamental structure.",
+  "author": {
+    "name": "Filamental",
+    "email": "cosimo@filamental.space",
+    "url": "https://filamental.space"
+  },
+  "homepage": "https://filamental.space",
+  "repository": "https://github.com/Scottnine/filamental",
+  "license": "MIT",
+  "keywords": [
+    "filamental",
+    "knowledge-graph",
+    "graph",
+    "notes",
+    "productivity"
+  ]
+}

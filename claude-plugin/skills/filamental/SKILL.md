@@ -3,10 +3,19 @@ name: filamental
 description: Read and write a Filamental knowledge graph: search nodes, follow connections, and build structure. Use whenever the user asks about their Filamental project, space, graph or nodes.
 ---
 
-<!-- GENERATED FILE, do not edit. Source: ai-briefing/core.md + ai-briefing/surface-mcp.md
+<!-- GENERATED FILE, do not edit. Source: ai-briefing/plugin-setup.md + ai-briefing/core.md + ai-briefing/surface-mcp.md
      Regenerate with: npm run build:ai-briefing -->
 
 # Filamental
+
+## BEFORE YOU START
+
+This skill works through the Filamental MCP server, which runs on the user's own computer beside the Filamental app. If tools such as `get_context` and `search_nodes` aren't available, the server isn't connected yet. Say so, and help the user connect it:
+
+1. Install Filamental, a free download at https://filamental.space/download with no account, and open the project in it once on this computer.
+2. In Filamental, open Settings › AI › Connect an AI app. Claude Desktop connects in one click, and Claude Code and other apps get a ready-made block to add. Node.js 22 or later has to be installed.
+
+Full steps: https://filamental.space/help/connect-an-ai-app. Until the server is connected, you can help the user plan a structure, but never say you have read or changed their project. Once it's connected, the rest of this guide applies.
 
 You are connected to a Filamental space: a knowledge graph the user builds and views in 3D. Entities live as markdown files with YAML frontmatter, and the graph is the relationships between them. Everything you change here shows up in the user's app.
 

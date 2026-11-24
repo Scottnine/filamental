@@ -29,7 +29,8 @@ Once installed, Filamental keeps itself up to date.
 | Folder | What it is |
 |---|---|
 | [`mcp/`](mcp) | The Filamental MCP server, [`filamental-mcp`](https://www.npmjs.com/package/filamental-mcp) on npm. It lets Claude and other AI apps search, read and build your Filamental project |
-| [`claude-plugin/`](claude-plugin) | Filamental as a Claude plugin: the MCP server plus a skill that teaches Claude how to work with a Filamental structure |
+| [`claude-plugin/`](claude-plugin) | Filamental as a Claude plugin: the skill that teaches Claude how to work with a Filamental structure, for use with the MCP server you connect from Filamental |
+| [`claude-plugin-local/`](claude-plugin-local) | The full Claude plugin, the MCP server and the skill in one install. In Claude Code: `/plugin marketplace add Scottnine/filamental`, then `/plugin install filamental@filamental` |
 | [`skills/`](skills) | The Filamental agent skill and file-format reference, for AI apps that read skills |
 
 ---
@@ -40,8 +41,8 @@ The **Filamental application** is proprietary. All rights reserved. It is licens
 solely under the terms at [filamental.space/terms](https://filamental.space/terms). This repository
 does not contain its source.
 
-The **MCP server** (`mcp/`), the **Claude plugin** (`claude-plugin/`) and the **agent skills**
-(`skills/`) are MIT licensed so that other tools can integrate with Filamental. That permission
+The **MCP server** (`mcp/`), the **Claude plugins** (`claude-plugin/`, `claude-plugin-local/`
+and the marketplace file in `.claude-plugin/`) and the **agent skills** (`skills/`) are MIT licensed so that other tools can integrate with Filamental. That permission
 covers those directories only.
 
 See [LICENSE](LICENSE) for the full statement.
