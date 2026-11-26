@@ -1,4 +1,4 @@
-# 3D Filamental.space
+# 3D Documents & Mind Mapping by Filamental
 
 Filamental is a spatial app for systems and visual thinkers. 2D & 3D work for almost any role or task. Create connected networks, networked documents, documented knowledge.
 
@@ -20,92 +20,40 @@ Privacy: Your data stays on your machine, under your control and you decide wher
 - All local. You set the terms. You choose where your data resides, not us.
 - Built-in help playground, templates, feature suggestions, bug reporting and granular adjustments
 
-## What Claude can do
+## What the skill teaches Claude
 
-- **Get its bearings.** A structure report says what a space is made of, which
+This plugin is a skill: it shows Claude how to work well with a Filamental
+space when Filamental's tools are available to it.
+
+- **Get its bearings** from a structure report: what a space is made of, which
   nodes carry the most weight, and which are unconnected or still have no notes.
-- **Read in context.** One call returns a node's notes with its whole
-  neighbourhood inlined as a single readable document.
-- **Answer "how is X connected to Y?"** It finds the shortest chain of
-  connectors between two nodes, the same route Pathfinder lights in Filamental,
-  and says how each hop reads.
-- **Search** names, notes and property values, or filter on any field.
-- **Build and edit** nodes and connectors, using the space's own node types and
-  connector types.
+- **Read in context**, with a node's notes and its whole neighbourhood as one
+  readable document.
+- **Answer "how is X connected to Y?"** with the shortest chain of connectors,
+  the same route Pathfinder lights in Filamental.
+- **Build a structure that stays clear**: a small, deliberate set of node types
+  and connector types, the reasoning written into each node's notes, and only
+  the relationships your material actually states.
 - **Restructure** a long note by moving a section into a node of its own, or
-  folding one back in. The text moves rather than being copied, so there's only
-  ever one copy of it.
+  folding one back in, so there's only ever one copy of any text.
 
-The skill shows Claude how to build a structure that stays clear, with a small,
-deliberate set of types, the reasoning written into each node's notes, and only
-the relationships your material actually states.
-
-## What you need
-
-- **Filamental**, installed, with a space open. It's a free download at
-  [filamental.space/download](https://filamental.space/download), with no
-  account and no form.
-- **The Filamental MCP server, connected.** In Filamental, open Settings › AI ›
-  Connect an AI app: Claude Desktop connects in one click, and Claude Code gets
-  a ready-made block to add. The server needs Node.js 22 or later. Full steps
-  are at [filamental.space/help/connect-an-ai-app](https://filamental.space/help/connect-an-ai-app).
-
-In Claude Code you can install the skill and the server together instead:
-
-```
-/plugin marketplace add Scottnine/filamental
-/plugin install filamental@filamental
-```
-
-## Where it works
-
-| Surface | What works |
-| --- | --- |
-| Claude Code | The skill, and the tools once the server is connected |
-| Cowork, running on your computer | The skill, and the tools once the server is connected |
-| Claude chat | The skill only. Chat doesn't reach servers on your computer, so the tools aren't there |
+Filamental itself is a free download at
+[filamental.space/download](https://filamental.space/download), with no
+account and no form.
 
 ## What's in the plugin
 
 | File | Purpose |
 | --- | --- |
 | `.claude-plugin/plugin.json` | The manifest |
-| `skills/filamental/SKILL.md` | How Claude should read and build a Filamental structure, and how to connect the server if it isn't there yet |
-
-## The tools
-
-| Read | Write |
-| --- | --- |
-| `get_structure_report`, `get_context`, `find_path`, `search_nodes`, `get_node`, `get_connections`, `get_subgraph`, `get_project_info`, `list_node_types`, `list_connector_types`, `read_skill_guide`, `read_format_reference` | `create_node`, `update_node`, `delete_node`, `create_edge`, `delete_edge`, `extract_section`, `inline_section` |
-
-Every tool carries MCP annotations that mark it read-only or say whether it
-changes or deletes content. Each one is described in the
-[server's README](https://github.com/Scottnine/filamental/tree/main/mcp#tools).
+| `skills/filamental/SKILL.md` | How Claude should read and build a Filamental structure |
 
 ## What it runs, reads and writes
 
-The plugin runs nothing itself: it's a skill. The tools come from the
-Filamental MCP server you connect, the
-[`filamental-mcp`](https://www.npmjs.com/package/filamental-mcp) package on
-npm, whose source is in the
-[`mcp/`](https://github.com/Scottnine/filamental/tree/main/mcp) folder of this
-repository.
-
-The server works entirely on your computer:
-
-- It reads Filamental's settings folder, to find the space you have open and
-  the reference guides Filamental installs.
-- It reads and searches the Markdown files in that space, and the
-  `.filamental/` folder that holds its node types and connector types.
-- When you ask Claude to, it creates, edits and deletes node files in that
-  space. They're the same files Filamental shows you, so you see each change as
-  it happens.
-
-It makes no other network requests, and your notes stay on your computer.
-Filamental has no telemetry.
+Nothing. The plugin is a skill, so it runs no code, reads no files and makes no
+network requests of its own. Filamental has no telemetry.
 
 ## Licence
 
-The plugin and the Filamental MCP server are MIT licensed. Filamental itself is
-proprietary, and its terms are at
-[filamental.space/terms](https://filamental.space/terms).
+The plugin is MIT licensed. Filamental itself is proprietary, and its terms are
+at [filamental.space/terms](https://filamental.space/terms).

@@ -1,8 +1,8 @@
 {
   "name": "filamental",
-  "displayName": "3D Filamental.space",
-  "version": "1.1.0",
-  "description": "Free flowcharts, documents, publishing and presenting. Read/write/connect your pages and nodes in 3D using our local MCP and create next-generation work you own.",
+  "displayName": "3D Documents & Mind Mapping by Filamental",
+  "version": "1.1.1",
+  "description": "Free flowcharts, documents, publishing and presenting. Read, write and connect your pages and nodes in 3D, and create next-generation work you own.",
   "author": {
     "name": "Filamental",
     "email": "cosimo@filamental.space",
@@ -19,7 +19,7 @@
     "productivity"
   ],
   "icon": "./icon.png",
-  "documentationUrl": "https://filamental.space/help/connect-an-ai-app",
+  "documentationUrl": "https://filamental.space/help",
   "supportUrl": "https://filamental.space/help/account-and-support",
   "privacyPolicyUrl": "https://filamental.space/privacy",
   "termsOfServiceUrl": "https://filamental.space/terms"
