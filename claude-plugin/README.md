@@ -4,6 +4,8 @@ Filamental is a spatial app for systems and visual thinkers. 2D & 3D work for al
 
 Limited only by your imagination, add anything, link to anything, share to anyone.
 
+Take your conversation with Claude out of a straight line. Talk it through in the chat and see it take shape in 3D as you go. Add a node or draw a connector on the canvas yourself, and Claude builds on what you've added. Your thinking branches, and now your conversation can too.
+
 Add themes, colors, tables, columns, images and backgrounds to enhance your work.
 
 Privacy: Your data stays on your machine, under your control and you decide where it goes.

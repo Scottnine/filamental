@@ -74,6 +74,8 @@ Use `get_subgraph` for structure rather than content, and `get_connections` for 
 
 `create_node` and `create_edge` add to the structure, `delete_node` and `delete_edge` remove from it. `update_node` replaces any `properties` or `relationships` you pass as a whole set.
 
+The user works on the same space on the canvas while you talk, adding nodes and connectors between your replies. Read a node again before you change it, rather than working from an earlier read, and build on what they've added.
+
 In a note, a ```` ```mermaid ```` fence draws a diagram and a ```` ```chart ```` fence of YAML a chart; `read_format_reference` lists its keys, write no others.
 
 `extract_section` moves a heading's section into a node of its own, leaving a wikilink and a connector behind. `inline_section` folds it back. Both take `dry_run`, and both move content rather than copying it.

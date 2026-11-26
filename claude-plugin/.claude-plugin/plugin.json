@@ -1,8 +1,8 @@
 {
   "name": "filamental",
   "displayName": "3D Documents & Mind Mapping by Filamental",
-  "version": "1.1.1",
-  "description": "Free flowcharts, documents, publishing and presenting. Read, write and connect your pages and nodes in 3D, and create next-generation work you own.",
+  "version": "1.1.2",
+  "description": "Free flowcharts, documents, publishing and presenting. Take your Claude conversation out of a straight line: see it take shape in 3D, add to it in the chat or on the canvas, and create next-generation work you own.",
   "author": {
     "name": "Filamental",
     "email": "cosimo@filamental.space",
